@@ -1,52 +1,52 @@
-from typing import Dict, List, Optional
-from abc import ABC
+from typing import Dict, List, Tuple, Optional
 from collections.abc import Hashable
 
 from .model import BaseModel
 from .query import BaseQuery
 
 
-class BaseCache(ABC):
-    _cache: Dict
+class ModelCache:
+    """
+    Stores BaseModel objects in dictionary with (type, hash)
+    indexes.
+    """
+
+    _cache: Dict[Tuple[str, str], BaseModel] = {}
 
     def __init__(self):
         self._cache = {}
 
-
-class ModelCache(BaseCache):
-    _cache: Dict[str, Dict[str, BaseModel]] = {}
-
     def register(self, obj: BaseModel, force: bool = False) -> bool:
         assert obj is not None
-        assert isinstance(obj, Hashable)
+        assert isinstance(obj, BaseModel)
 
-        t = str(obj.__class__.__name__)
+        t = obj.__class__
         h = str(obj.__hash__())
-
-        if t not in self._cache:
-            self._cache[t] = {}
 
         cached = None
 
         if not force:
-            cached = self.get(obj.__class__, h)
+            cached = self.get(t, h)
 
         if not cached:
-            self._cache[t][h] = obj
+            self._cache[(str(t.__name__), h)] = obj
             return True
 
         return False
 
     def get(self, model_type: type, obj_hash: str) -> Optional[BaseModel]:
-        model_dict = self._cache.get(str(model_type.__name__), None)
-        if model_dict:
-            return model_dict.get(str(obj_hash), None)
-
-        return None
+        return self._cache.get((str(model_type.__name__), obj_hash), None)
 
 
-class QueryCache(BaseCache):
+class QueryCache:
+    """
+
+    """
+
     _cache: Dict[str, List[BaseModel]]
+
+    def __init__(self):
+        self._cache = {}
 
     def register(self, obj: BaseQuery, results: List[BaseModel],
                  force: bool = False) -> bool:
