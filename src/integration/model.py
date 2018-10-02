@@ -73,8 +73,8 @@ class BaseModel(Generic[T]):
     def _get_key_attribute(self, key_type: Optional[Type[T]] = None) -> str:
         if not key_type:
             if not self._default_primary_key:
-                raise RuntimeError("This object does not contain a default primary key defined. \
-                            You must define at least one PrimaryKey property.")
+                raise RuntimeError("This object does not contain a default primary key defined." +
+                                   "You must define at least one PrimaryKey property.")
 
             return self._default_primary_key
 

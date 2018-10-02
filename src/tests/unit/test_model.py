@@ -86,7 +86,8 @@ class TestModel(unittest.TestCase):
         with self.assertRaises(RuntimeError) as ex:
             x.set_key("1")
 
-        self.assertIn("Primary key value must be of type int", str(ex.exception))
+        self.assertIn("Primary key value must be of type int",
+                      str(ex.exception))
 
         with self.assertRaises(RuntimeError) as ex:
             x.set_key("1", str)

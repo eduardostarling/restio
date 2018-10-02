@@ -1,7 +1,7 @@
-from typing import Dict, List, Tuple, Optional, Type
+from typing import Dict, List, Tuple, Optional, Type, overload
 from collections.abc import Hashable
 
-from .model import BaseModel, T
+from .model import BaseModel, PrimaryKey, T
 from .query import BaseQuery
 
 
@@ -44,8 +44,19 @@ class ModelCache:
                 for (model_type, model_hash), model in self._cache.items()
                 if filter_type.__name__ == model_type}
 
+    @overload
     def get(self, model_type: Type[BaseModel], value: T) -> Optional[BaseModel]:
+        ...
+
+    @overload
+    def get(self, model_type: Type[BaseModel], value: PrimaryKey) -> Optional[BaseModel]:
+        ...
+
+    def get(self, model_type, value):
         models = self.get_type(model_type)
+        if isinstance(value, PrimaryKey):
+            value = value.get()
+
         if value and models:
             for model in models.values():
                 if model.get_key() == value:
