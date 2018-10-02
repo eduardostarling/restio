@@ -1,7 +1,7 @@
 from typing import Dict, List, Tuple, Optional, Type, overload
 from collections.abc import Hashable
 
-from .model import BaseModel, PrimaryKey, T
+from .model import BaseModel, ValueKey
 from .query import BaseQuery
 
 
@@ -22,7 +22,7 @@ class ModelCache:
 
         obj_type = obj.__class__
         obj_hash = str(obj.__hash__())
-        obj_pk = obj.get_key()
+        obj_pk = obj.get_keys()
 
         cached = self.get_by_internal_id(obj_type, obj_hash)
 
@@ -45,21 +45,29 @@ class ModelCache:
                 if filter_type.__name__ == model_type}
 
     @overload
-    def get(self, model_type: Type[BaseModel], value: T) -> Optional[BaseModel]:
+    def get(self, model_type: Type[BaseModel], value: Tuple[ValueKey, ...]) -> Optional[BaseModel]:
         ...
 
     @overload
-    def get(self, model_type: Type[BaseModel], value: PrimaryKey) -> Optional[BaseModel]:
+    def get(self, model_type: Type[BaseModel], value: List[ValueKey]) -> Optional[BaseModel]:
+        ...
+
+    @overload
+    def get(self, model_type: Type[BaseModel], value: ValueKey) -> Optional[BaseModel]:
         ...
 
     def get(self, model_type, value):
         models = self.get_type(model_type)
-        if isinstance(value, PrimaryKey):
-            value = value.get()
+
+        if isinstance(value, list):
+            value = tuple(value)
+
+        if not isinstance(value, tuple):
+            value = (value,)
 
         if value and models:
             for model in models.values():
-                if model.get_key() == value:
+                if model.get_keys() == value:
                     return model
 
         return None
@@ -70,7 +78,7 @@ class ModelCache:
 
 class QueryCache:
     """
-
+    Stores query results based on Query hash.
     """
 
     _cache: Dict[str, List[BaseModel]]
@@ -95,5 +103,15 @@ class QueryCache:
 
         return False
 
+    @overload
     def get(self, obj_hash: str) -> Optional[List[BaseModel]]:
+        ...
+
+    @overload
+    def get(self, obj_hash: BaseQuery) -> Optional[List[BaseModel]]:
+        ...
+
+    def get(self, obj_hash):
+        if isinstance(obj_hash, BaseQuery):
+            obj_hash = obj_hash.__hash__()
         return self._cache.get(str(obj_hash))

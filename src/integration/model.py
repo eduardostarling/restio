@@ -1,5 +1,5 @@
 
-from typing import Optional, Generic, TypeVar, Dict, get_type_hints, Type
+from typing import Optional, Generic, TypeVar, Dict, Tuple, List, Union, Type, get_type_hints, overload
 from uuid import uuid4, UUID
 
 T = TypeVar('T', int, str)
@@ -23,17 +23,20 @@ class PrimaryKey(Generic[T]):
         return self.value
 
     def __eq__(self, other: object) -> bool:
-        return isinstance(other, PrimaryKey) and \
-               isinstance(other.value, type(self.value)) and \
-               self.value == other.value
+        if isinstance(other, PrimaryKey):
+            return issubclass(other._type, self._type) and other.value == self.value
+        else:
+            return issubclass(type(other), self._type) and other == self.value
 
     def __hash__(self):
         return self.value
 
 
+ValueKey = Union[T, PrimaryKey]
+
+
 class BaseModel(Generic[T]):
     _internal_id: UUID
-    _default_primary_key: Optional[str] = None
 
     @staticmethod
     def __get_primary_keys(cls) -> Dict[str, type]:
@@ -44,61 +47,73 @@ class BaseModel(Generic[T]):
         attrs = BaseModel.__get_primary_keys(cls)
         instance = super().__new__(cls)
 
-        default_key = kwargs.get('default_primary_key', None)
+        primary_keys: Optional[Tuple[ValueKey, ...]] = kwargs.get('primary_keys', [])
 
         if attrs:
-            if default_key:
-                if default_key not in attrs:
-                    raise RuntimeError("Provided default PrimaryKey does not exist.")
-
-                instance._default_primary_key = default_key
-            else:
+            if not primary_keys:
                 for attr_pk, attr_type in attrs.items():
-                    if not instance._default_primary_key and attr_type is int:
-                        instance._default_primary_key = attr_pk
-
                     if issubclass(attr_type, int):
-                        setattr(instance, attr_pk, PrimaryKey(0))
+                        primary_keys.append(PrimaryKey(0))
                     elif issubclass(attr_type, str):
-                        setattr(instance, attr_pk, PrimaryKey(""))
+                        primary_keys.append(PrimaryKey(""))
 
-            if not instance._default_primary_key:
-                instance._default_primary_key = list(attrs.keys())[0]
+            instance.set_keys(primary_keys)
+        elif primary_keys:
+            raise RuntimeError("This model does not contain primary keys.")
 
         return instance
 
-    def __init__(self, uuid: Optional[UUID] = None) -> None:
+    def __init__(self, uuid: Optional[UUID] = None, *args, **kwargs) -> None:
         self._internal_id = uuid if uuid else uuid4()
-
-    def _get_key_attribute(self, key_type: Optional[Type[T]] = None) -> str:
-        if not key_type:
-            if not self._default_primary_key:
-                raise RuntimeError("This object does not contain a default primary key defined." +
-                                   "You must define at least one PrimaryKey property.")
-
-            return self._default_primary_key
-
-        for attr_pk, attr_type in self.__get_primary_keys(self).items():
-            if issubclass(attr_type, key_type):
-                return attr_pk
-
-        raise RuntimeError(f'No PrimaryKey with type {key_type.__name__} has been found')
 
     def _check_primary_key(self, attr_pk: str):
         if attr_pk not in self.__get_primary_keys(self):
             raise RuntimeError(f'Key attribute {attr_pk} does not exist in current object.')
 
-    def get_key(self, key_type: Optional[Type[T]] = None) -> T:
-        attr_pk = self._get_key_attribute(key_type)
-        self._check_primary_key(attr_pk)
+    def get_primary_keys(self) -> Tuple[PrimaryKey, ...]:
+        return tuple([getattr(self, key) for key in self.__get_primary_keys(self)])
 
-        return getattr(self, attr_pk).get()
+    def get_keys(self) -> Tuple[T, ...]:
+        return tuple([pk.get() for pk in self.get_primary_keys()])
 
-    def set_key(self, value: T, key_type: Optional[Type[T]] = None):
-        attr_pk = self._get_key_attribute(key_type)
-        self._check_primary_key(attr_pk)
+    @overload
+    def set_keys(self, primary_keys: Tuple[ValueKey, ...]):
+        ...
 
-        getattr(self, attr_pk).set(value)
+    @overload
+    def set_keys(self, primary_keys: List[ValueKey]):
+        ...
+
+    @overload
+    def set_keys(self, primary_keys: ValueKey):
+        ...
+
+    def set_keys(self, primary_keys):
+        attrs = self.__get_primary_keys(self)
+
+        if not attrs:
+            raise RuntimeError("This object does not contain primary keys.")
+
+        if isinstance(primary_keys, list):
+            primary_keys = tuple(primary_keys)
+
+        if not isinstance(primary_keys, tuple):
+            primary_keys = (primary_keys,)
+
+        if len(attrs) != len(primary_keys):
+            raise RuntimeError("The number of primary keys provided is incompatible.")
+
+        attr_keys = list(attrs.keys())
+        attr_types = list(attrs.values())
+
+        for index, primary_key in enumerate(primary_keys):
+            if not isinstance(primary_key, PrimaryKey):
+                primary_key = PrimaryKey(primary_key)
+
+            if not issubclass(attr_types[index], primary_key._type):
+                raise RuntimeError(
+                    f'Type {primary_key._type.__name__} on position {index} incompatible with {attr_keys[index]} of type {attr_types[index].__name__}')
+            setattr(self, attr_keys[index], primary_key)
 
     def __hash__(self):
         return str(self._internal_id)

@@ -1,11 +1,19 @@
 import unittest
 
 from integration.model import BaseModel, PrimaryKey
+from integration.cache import BaseQuery
 from integration.cache import ModelCache, QueryCache
 
 
 class Model(BaseModel):
     id: PrimaryKey[int]
+
+
+class Query(BaseQuery):
+    def __call__(self):
+        m1 = Model(primary_keys=PrimaryKey(1))
+        m2 = Model(primary_keys=PrimaryKey(2))
+        return [m1, m2]
 
 
 class TestModelCache(unittest.TestCase):
@@ -28,11 +36,11 @@ class TestModelCache(unittest.TestCase):
     def test_register_unique_primary_key(self):
         # Model with unique key 1
         m2 = Model()
-        m2.set_key(1)
+        m2.set_keys(1)
 
         # Model with duplicated key 1
         m3 = Model()
-        m3.set_key(1)
+        m3.set_keys(1)
 
         # Registers model with unique key 1
         self.assertTrue(self.x.register(m2))
@@ -45,11 +53,11 @@ class TestModelCache(unittest.TestCase):
     def test_register_force(self):
         # Model with unique key 1
         m2 = Model()
-        m2.set_key(1)
+        m2.set_keys(1)
 
         # Model with duplicated key 1
         m3 = Model()
-        m3.set_key(1)
+        m3.set_keys(1)
 
         # Registers model with unique key 1
         self.assertTrue(self.x.register(m2))
@@ -82,16 +90,16 @@ class TestModelCache(unittest.TestCase):
     def test_get(self):
         self.test_register_unique_primary_key()
         # Checks if model now exists in cache
-        self.assertIsNotNone(self.x.get(Model, 1))
+        self.assertIsNotNone(self.x.get(Model, (1,)))
         # Checks if another type does not exist in cache
-        self.assertIsNone(self.x.get(BaseModel, 1))
+        self.assertIsNone(self.x.get(BaseModel, (1,)))
 
     def test_hash(self):
         self.assertEqual(str(self.m._internal_id), self.m.__hash__())
 
     def test_get_key(self):
         m = Model()
-        m.set_key(1)
+        m.set_keys(1)
 
         self.x.register(m)
         first_ref = self.x.get_by_internal_id(Model, m.__hash__())
@@ -103,12 +111,19 @@ class TestModelCache(unittest.TestCase):
 
 
 class TestQueryCache(unittest.TestCase):
+    def setUp(self):
+        self.x = QueryCache()
+        self.q = Query()
+        self.r = self.q()  # results
+
     def test_init(self):
-        x = QueryCache()
-        self.assertDictEqual(x._cache, {})
+        self.assertDictEqual(self.x._cache, {})
 
     def test_register(self):
-        pass
+        self.assertTrue(self.x.register(self.q, self.r))
+        self.assertFalse(self.x.register(self.q, self.r))
 
     def test_get(self):
-        pass
+        self.test_register()
+        self.assertListEqual(self.x.get(self.q), self.r)
+        self.assertListEqual(self.x.get(self.q.__hash__()), self.r)
