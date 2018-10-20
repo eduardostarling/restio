@@ -1,6 +1,18 @@
 
-from typing import Optional, Generic, TypeVar, Dict, Tuple, List, Union, Type, get_type_hints, overload
+from __future__ import annotations
+from typing import Optional, Generic, TypeVar, Dict, Tuple, List, Union, Type, Any, get_type_hints, overload
+from copy import deepcopy
+from enum import Enum
 from uuid import uuid4, UUID
+
+
+class ModelState(Enum):
+    CLEAN = 0
+    NEW = 1
+    DIRTY = 2
+    DELETED = 3
+    DISCARDED = 4
+
 
 T = TypeVar('T', int, str)
 
@@ -37,14 +49,24 @@ ValueKey = Union[T, PrimaryKey]
 
 class BaseModel(Generic[T]):
     _internal_id: UUID
+    _state: ModelState = ModelState.CLEAN
+
+    _immutable: List[str] = ['_immutable', '_internal_id', '_state']
 
     @staticmethod
     def __get_primary_keys(cls) -> Dict[str, type]:
         return {attr: t.__args__[0] for attr, t in get_type_hints(cls).items()
                 if hasattr(t, '__origin__') and t.__origin__ is PrimaryKey}
 
+    @staticmethod
+    def __get_typed_fields(cls) -> Dict[str, type]:
+        return {attr: t for attr, t in get_type_hints(cls).items()
+                if not hasattr(t, '__origin__') or (hasattr(t, '__origin__') and t.__origin__ is not PrimaryKey)}
+
     def __new__(cls, *args, **kwargs):
         attrs = BaseModel.__get_primary_keys(cls)
+        fields = BaseModel.__get_typed_fields(cls)
+
         instance = super().__new__(cls)
 
         primary_keys: Optional[Tuple[ValueKey, ...]] = kwargs.get('primary_keys', [])
@@ -61,14 +83,15 @@ class BaseModel(Generic[T]):
         elif primary_keys:
             raise RuntimeError("This model does not contain primary keys.")
 
+        for field in fields.keys():
+            if not hasattr(instance, field):
+                setattr(instance, field, None)
+
         return instance
 
     def __init__(self, uuid: Optional[UUID] = None, *args, **kwargs) -> None:
         self._internal_id = uuid if uuid else uuid4()
-
-    def _check_primary_key(self, attr_pk: str):
-        if attr_pk not in self.__get_primary_keys(self):
-            raise RuntimeError(f'Key attribute {attr_pk} does not exist in current object.')
+        self._state = ModelState.CLEAN
 
     def get_primary_keys(self) -> Tuple[PrimaryKey, ...]:
         return tuple([getattr(self, key) for key in self.__get_primary_keys(self)])
@@ -112,8 +135,18 @@ class BaseModel(Generic[T]):
 
             if not issubclass(attr_types[index], primary_key._type):
                 raise RuntimeError(
-                    f'Type {primary_key._type.__name__} on position {index} incompatible with {attr_keys[index]} of type {attr_types[index].__name__}')
+                    f'Type {primary_key._type.__name__} on position {index} incompatible' +
+                    ' with {attr_keys[index]} of type {attr_types[index].__name__}')
             setattr(self, attr_keys[index], primary_key)
+
+    def copy(self) -> BaseModel:  # noqa: F821
+        return deepcopy(self)
+
+    def _get_mutable_fields(self) -> Dict[str, Any]:
+        attrs = set(BaseModel.__get_primary_keys(self.__class__)) | \
+            set(BaseModel.__get_typed_fields(self.__class__))
+
+        return {k: getattr(self, k) for k in attrs - set(self._immutable)}
 
     def __hash__(self):
         return str(self._internal_id)
@@ -123,9 +156,3 @@ class BaseModel(Generic[T]):
             return self.__hash__() == other.__hash__()
 
         return False
-
-
-class Model(BaseModel):
-    id: PrimaryKey[int]
-    key: PrimaryKey[str]
-    k: Optional[str]

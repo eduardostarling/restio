@@ -1,7 +1,8 @@
+from typing import List
 import unittest
 
 from integration.model import BaseModel, PrimaryKey
-from integration.cache import BaseQuery
+from integration.query import Query
 from integration.cache import ModelCache, QueryCache
 
 
@@ -9,11 +10,18 @@ class Model(BaseModel):
     id: PrimaryKey[int]
 
 
-class Query(BaseQuery):
-    def __call__(self):
-        m1 = Model(primary_keys=PrimaryKey(1))
-        m2 = Model(primary_keys=PrimaryKey(2))
-        return [m1, m2]
+@Query
+def SimpleQuery() -> List[Model]:
+    m1 = Model(primary_keys=PrimaryKey(1))
+    m2 = Model(primary_keys=PrimaryKey(2))
+    return [m1, m2]
+
+
+@Query
+def ArgsQuery(arg1: int, arg2: int = 2) -> List[BaseModel]:
+    m1 = Model(primary_keys=PrimaryKey(arg1))
+    m2 = Model(primary_keys=PrimaryKey(arg2))
+    return [m1, m2]
 
 
 class TestModelCache(unittest.TestCase):
@@ -113,17 +121,36 @@ class TestModelCache(unittest.TestCase):
 class TestQueryCache(unittest.TestCase):
     def setUp(self):
         self.x = QueryCache()
-        self.q = Query()
-        self.r = self.q()  # results
+        self.q = SimpleQuery
+        self.qa = ArgsQuery(5, 6)
+        self.qaa = ArgsQuery(5, 7)
+        self.r = self.q()
+        self.ra = self.qa()
+        self.raa = self.qaa()
 
     def test_init(self):
         self.assertDictEqual(self.x._cache, {})
 
-    def test_register(self):
+    def test_register_noargs(self):
         self.assertTrue(self.x.register(self.q, self.r))
         self.assertFalse(self.x.register(self.q, self.r))
 
-    def test_get(self):
-        self.test_register()
+    def test_get_noargs(self):
+        self.test_register_noargs()
         self.assertListEqual(self.x.get(self.q), self.r)
         self.assertListEqual(self.x.get(self.q.__hash__()), self.r)
+
+    def test_register_args(self):
+        self.assertTrue(self.x.register(self.qa, self.ra))
+        self.assertFalse(self.x.register(self.qa, self.ra))
+
+        self.assertTrue(self.x.register(self.qaa, self.raa))
+        self.assertFalse(self.x.register(self.qaa, self.raa))
+
+    def test_query(self):
+        q1 = ArgsQuery(arg2=2, arg1=1)
+        q2 = ArgsQuery(1, 2)
+        q3 = ArgsQuery(1, arg2=2)
+
+        self.assertEqual(q1, q2)
+        self.assertEqual(q2, q3)

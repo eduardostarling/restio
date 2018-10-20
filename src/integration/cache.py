@@ -1,5 +1,6 @@
 from typing import Dict, List, Tuple, Optional, Type, overload
 from collections.abc import Hashable
+from copy import copy
 
 from .model import BaseModel, ValueKey
 from .query import BaseQuery
@@ -58,7 +59,6 @@ class ModelCache:
 
     def get(self, model_type, value):
         models = self.get_type(model_type)
-
         if isinstance(value, list):
             value = tuple(value)
 
@@ -68,7 +68,7 @@ class ModelCache:
         if value and models:
             for model in models.values():
                 if model.get_keys() == value:
-                    return model
+                    return model.copy()
 
         return None
 
@@ -97,7 +97,7 @@ class QueryCache:
         if not force:
             cached = self.get(h)
 
-        if not cached:
+        if not cached and results:
             self._cache[h] = results
             return True
 
