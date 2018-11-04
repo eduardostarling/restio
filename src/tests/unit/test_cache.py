@@ -1,26 +1,27 @@
 from typing import List
 import unittest
 
-from integration.model import BaseModel, PrimaryKey
+from integration.model import BaseModel, PrimaryKey, pk, mdataclass
 from integration.query import Query
 from integration.cache import ModelCache, QueryCache
 
 
+@mdataclass
 class Model(BaseModel):
-    id: PrimaryKey[int]
+    id: PrimaryKey[int] = pk(int)
 
 
 @Query
-def SimpleQuery() -> List[Model]:
-    m1 = Model(primary_keys=PrimaryKey(1))
-    m2 = Model(primary_keys=PrimaryKey(2))
+def SimpleQuery(self) -> List[Model]:
+    m1 = Model(id=PrimaryKey(int, 1))
+    m2 = Model(id=PrimaryKey(int, 2))
     return [m1, m2]
 
 
 @Query
-def ArgsQuery(arg1: int, arg2: int = 2) -> List[BaseModel]:
-    m1 = Model(primary_keys=PrimaryKey(arg1))
-    m2 = Model(primary_keys=PrimaryKey(arg2))
+def ArgsQuery(self, arg1: int, arg2: int = 2) -> List[BaseModel]:
+    m1 = Model(id=PrimaryKey(int, arg1))
+    m2 = Model(id=PrimaryKey(int, arg2))
     return [m1, m2]
 
 
@@ -35,7 +36,7 @@ class TestModelCache(unittest.TestCase):
 
     def test_register_unique_internal_id(self):
         # Checks if model does not exist in cache
-        self.assertIsNone(self.x.get_by_internal_id(Model, self.m.__hash__()))
+        self.assertIsNone(self.x.get_by_internal_id(Model, self.m._internal_id))
         # Registers model in cache
         self.assertTrue(self.x.register(self.m))
         # Tries to register the same model again
@@ -91,7 +92,8 @@ class TestModelCache(unittest.TestCase):
     def test_get_by_internal_id(self):
         self.test_register_unique_internal_id()
         # Checks if model now exists in cache
-        self.assertIsNotNone(self.x.get_by_internal_id(Model, self.m.__hash__()))
+        c = self.x.get_by_internal_id(Model, self.m._internal_id)
+        self.assertIsNotNone(c)
         # Checks if another type does not exist in cache
         self.assertIsNone(self.x.get_by_internal_id(BaseModel, "fake"))
 
@@ -102,17 +104,14 @@ class TestModelCache(unittest.TestCase):
         # Checks if another type does not exist in cache
         self.assertIsNone(self.x.get(BaseModel, (1,)))
 
-    def test_hash(self):
-        self.assertEqual(str(self.m._internal_id), self.m.__hash__())
-
     def test_get_key(self):
         m = Model()
         m.set_keys(1)
 
         self.x.register(m)
-        first_ref = self.x.get_by_internal_id(Model, m.__hash__())
+        first_ref = self.x.get_by_internal_id(Model, m._internal_id)
         second_ref = self.x.get(Model, m.id.get())
-        third_ref = self.x.get(Model, m.id)
+        third_ref = self.x.get(Model, [m.id])
 
         self.assertEqual(first_ref, second_ref)
         self.assertEqual(second_ref, third_ref)
@@ -146,11 +145,3 @@ class TestQueryCache(unittest.TestCase):
 
         self.assertTrue(self.x.register(self.qaa, self.raa))
         self.assertFalse(self.x.register(self.qaa, self.raa))
-
-    def test_query(self):
-        q1 = ArgsQuery(arg2=2, arg1=1)
-        q2 = ArgsQuery(1, 2)
-        q3 = ArgsQuery(1, arg2=2)
-
-        self.assertEqual(q1, q2)
-        self.assertEqual(q2, q3)

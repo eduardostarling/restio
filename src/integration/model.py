@@ -1,37 +1,33 @@
-
 from __future__ import annotations
-from typing import Optional, Generic, TypeVar, Dict, Tuple, List, Union, Type, Any, get_type_hints, overload
+
+from typing import Generic, TypeVar, Dict, Tuple, List, Union, Type, Any, Optional, get_type_hints, overload, cast
 from copy import deepcopy
-from enum import Enum
+from dataclasses import dataclass, field
 from uuid import uuid4, UUID
 
-
-class ModelState(Enum):
-    CLEAN = 0
-    NEW = 1
-    DIRTY = 2
-    DELETED = 3
-    DISCARDED = 4
-
+from .state import ModelState
 
 T = TypeVar('T', int, str)
 
 
 class PrimaryKey(Generic[T]):
-    value: T
+    value: Optional[T]
     _type: Type[T]
 
-    def __init__(self, value: T) -> None:
-        self._type = type(value)
+    def __init__(self, key_type: Type[T], value: Optional[T] = None) -> None:
+        if key_type not in T.__constraints__:  # type: ignore
+            raise TypeError(f"Provided type {key_type.__name__} is not allowed.")
+
+        self._type = key_type
         self.set(value)
 
-    def set(self, value: T):
-        if not issubclass(type(value), self._type):
+    def set(self, value: Optional[T]):
+        if value is not None and not issubclass(type(value), self._type):
             raise RuntimeError(f"Primary key value must be of type {self._type.__name__}")
 
         self.value = value
 
-    def get(self) -> T:
+    def get(self) -> Optional[T]:
         return self.value
 
     def __eq__(self, other: object) -> bool:
@@ -41,17 +37,28 @@ class PrimaryKey(Generic[T]):
             return issubclass(type(other), self._type) and other == self.value
 
     def __hash__(self):
-        return self.value
+        return hash((self._type, self.value))
 
 
 ValueKey = Union[T, PrimaryKey]
 
 
-class BaseModel(Generic[T]):
-    _internal_id: UUID
-    _state: ModelState = ModelState.CLEAN
+def mdataclass(*args, **kwargs):
+    kwargs['eq'] = kwargs.get('eq', False)
+    kwargs['unsafe_hash'] = kwargs.get('unsafe_hash', True)
+    return dataclass(*args, **kwargs)
 
-    _immutable: List[str] = ['_immutable', '_internal_id', '_state']
+
+def pk(key_type: Type[T], default_value: Optional[T] = None, **kwargs):
+    return field(default=PrimaryKey(key_type, default_value), **kwargs)
+
+
+@mdataclass
+class BaseModel(Generic[T]):
+    _internal_id: UUID = field(default_factory=uuid4)
+    _state: ModelState = field(init=False, repr=False, compare=False, hash=False, default=ModelState.CLEAN)
+    _immutable: List[str] = field(default_factory=lambda: ['_immutable', '_internal_id', '_state', 'primary_keys'],
+                                  repr=False, init=False, compare=False, hash=False)
 
     @staticmethod
     def __get_primary_keys(cls) -> Dict[str, type]:
@@ -63,41 +70,11 @@ class BaseModel(Generic[T]):
         return {attr: t for attr, t in get_type_hints(cls).items()
                 if not hasattr(t, '__origin__') or (hasattr(t, '__origin__') and t.__origin__ is not PrimaryKey)}
 
-    def __new__(cls, *args, **kwargs):
-        attrs = BaseModel.__get_primary_keys(cls)
-        fields = BaseModel.__get_typed_fields(cls)
-
-        instance = super().__new__(cls)
-
-        primary_keys: Optional[Tuple[ValueKey, ...]] = kwargs.get('primary_keys', [])
-
-        if attrs:
-            if not primary_keys:
-                for attr_pk, attr_type in attrs.items():
-                    if issubclass(attr_type, int):
-                        primary_keys.append(PrimaryKey(0))
-                    elif issubclass(attr_type, str):
-                        primary_keys.append(PrimaryKey(""))
-
-            instance.set_keys(primary_keys)
-        elif primary_keys:
-            raise RuntimeError("This model does not contain primary keys.")
-
-        for field in fields.keys():
-            if not hasattr(instance, field):
-                setattr(instance, field, None)
-
-        return instance
-
-    def __init__(self, uuid: Optional[UUID] = None, *args, **kwargs) -> None:
-        self._internal_id = uuid if uuid else uuid4()
-        self._state = ModelState.CLEAN
-
     def get_primary_keys(self) -> Tuple[PrimaryKey, ...]:
-        return tuple([getattr(self, key) for key in self.__get_primary_keys(self)])
+        return tuple([cast(PrimaryKey, getattr(self, key)) for key in self.__get_primary_keys(self)])
 
-    def get_keys(self) -> Tuple[T, ...]:
-        return tuple([pk.get() for pk in self.get_primary_keys()])
+    def get_keys(self) -> Tuple[Optional[T], ...]:
+        return tuple([key.get() for key in self.get_primary_keys()])
 
     @overload
     def set_keys(self, primary_keys: Tuple[ValueKey, ...]):
@@ -131,7 +108,7 @@ class BaseModel(Generic[T]):
 
         for index, primary_key in enumerate(primary_keys):
             if not isinstance(primary_key, PrimaryKey):
-                primary_key = PrimaryKey(primary_key)
+                primary_key = PrimaryKey(type(primary_key), primary_key)
 
             if not issubclass(attr_types[index], primary_key._type):
                 raise RuntimeError(
@@ -148,11 +125,32 @@ class BaseModel(Generic[T]):
 
         return {k: getattr(self, k) for k in attrs - set(self._immutable)}
 
-    def __hash__(self):
-        return str(self._internal_id)
+    def get_children(self, recursive: bool = False, children: List['BaseModel'] = None,
+                     top_level: Optional['BaseModel'] = None) -> List['BaseModel']:
+
+        if children is None:
+            children = []
+
+        if top_level:
+            if self == top_level:
+                return children
+
+            if self not in children:
+                children.append(self)
+        else:
+            top_level = self
+
+        for value in self._get_mutable_fields().values():
+            if isinstance(value, BaseModel) and value not in children:
+                if recursive:
+                    value.get_children(recursive, children, top_level)
+                else:
+                    children.append(value)
+
+        return children
 
     def __eq__(self, other):
         if other and isinstance(other, type(self)):
-            return self.__hash__() == other.__hash__()
+            return self._internal_id == other._internal_id
 
         return False

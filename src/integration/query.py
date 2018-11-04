@@ -16,10 +16,14 @@ class BaseQuery:
         hash_list = [self.__function]
 
         signature = inspect.signature(self.__function)
-        parameters = signature.bind(*self.__args, **self.__kwargs)
+        parameters = signature.bind(self, *self.__args, **self.__kwargs)
+        parameters.arguments.pop('self')
         hash_list.extend(parameters.arguments.items())
 
         return hash(tuple(hash_list))
+
+    def _get_function(self):
+        return self.__function
 
     def __eq__(self, other):
         if other and isinstance(other, BaseQuery):
@@ -27,14 +31,21 @@ class BaseQuery:
 
         return False
 
-    def __call__(self):
-        return self.__function(*self.__args, **self.__kwargs)
+    def __call__(self, transaction: Any = None):
+        return self.__function(transaction, *self.__args, **self.__kwargs)
 
 
 def Query(function=None):
-    args_set = set(inspect.signature(function).parameters.keys())
+    params = inspect.signature(function).parameters
+    keys = list(params.keys())
 
-    if not args_set:
+    if keys:
+        first = keys[0]
+        if first != 'self':
+            raise AttributeError('The first parameter of a query needs to be "self".')
+        keys.remove('self')
+
+    if not keys:
         return BaseQuery(function=function)
     else:
         @wraps(function)

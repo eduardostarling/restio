@@ -1,6 +1,6 @@
 from typing import Dict, List, Tuple, Optional, Type, overload
 from collections.abc import Hashable
-from copy import copy
+from uuid import UUID
 
 from .model import BaseModel, ValueKey
 from .query import BaseQuery
@@ -17,13 +17,16 @@ class ModelCache:
     def __init__(self):
         self._cache = {}
 
+    def reset(self):
+        self._cache = {}
+
     def register(self, obj: BaseModel, force: bool = False) -> bool:
         assert obj is not None
         assert isinstance(obj, BaseModel)
 
         obj_type = obj.__class__
-        obj_hash = str(obj.__hash__())
         obj_pk = obj.get_keys()
+        obj_hash = str(obj._internal_id)
 
         cached = self.get_by_internal_id(obj_type, obj_hash)
 
@@ -31,7 +34,7 @@ class ModelCache:
             cached = self.get(obj_type, obj_pk)
 
         if cached and force:
-            del self._cache[str(obj_type.__name__), str(cached.__hash__())]
+            del self._cache[str(obj_type.__name__), str(cached._internal_id)]
             cached = None
 
         if not cached:
@@ -72,8 +75,19 @@ class ModelCache:
 
         return None
 
-    def get_by_internal_id(self, model_type: Type[BaseModel], obj_hash: str) -> Optional[BaseModel]:
-        return self._cache.get((str(model_type.__name__), obj_hash), None)
+    @overload
+    def get_by_internal_id(self, model_type: Type[BaseModel], internal_id: UUID) -> Optional[BaseModel]:
+        ...
+
+    @overload
+    def get_by_internal_id(self, model_type: Type[BaseModel], internal_id: str) -> Optional[BaseModel]:
+        ...
+
+    def get_by_internal_id(self, model_type, internal_id):
+        if isinstance(internal_id, UUID):
+            internal_id = str(internal_id)
+
+        return self._cache.get((str(model_type.__name__), internal_id), None)
 
 
 class QueryCache:
@@ -84,6 +98,9 @@ class QueryCache:
     _cache: Dict[str, List[BaseModel]]
 
     def __init__(self):
+        self._cache = {}
+
+    def reset(self):
         self._cache = {}
 
     def register(self, obj: BaseQuery, results: List[BaseModel],
