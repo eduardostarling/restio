@@ -3,6 +3,7 @@ from copy import deepcopy
 
 from .cache import ModelCache, QueryCache
 from .model import BaseModel, ValueKey
+from .state import Transition, ModelState, ModelStateMachine
 from .query import BaseQuery
 from .dao import BaseDAO
 
@@ -72,26 +73,60 @@ class Transaction:
             value = (value,)
 
         model: BaseModel = self._model_cache.get(model_type, value)
-        if not model:
-            dao: BaseDAO = self.get_dao(model_type)
-            if not dao:
-                raise RuntimeError(f"DAO for model type {model_type.__name__} not found for this transaction.")
 
-            model = cast(model_type, dao.get(value))
+        if model:
+            return model
+
+        dao: BaseDAO = self.get_dao(model_type)
+        if not dao:
+            raise RuntimeError(f"DAO for model type {model_type.__name__} not found for this transaction.")
+
+        model = cast(model_type, dao.get(value))
+        if model:
+            model._state = ModelStateMachine.transition(Transition.EXISTING_OBJECT, None)
             self.register_model(model, force=True)
 
         return model
 
-    def add(self, model: BaseModel):
-        ...
+    def add(self, model: BaseModel) -> bool:
+        assert model is not None
 
-    def remove(self, model: BaseModel):
-        ...
+        model_copy = model.copy()
+        model_copy._state = ModelStateMachine.transition(Transition.ADD_OBJECT, None)
 
-    def update(self, model: BaseModel):
-        ...
+        return self._model_cache.register(model_copy)
 
-    def query(self, query: BaseQuery, force: bool = False):
+    def _assert_cache_internal_id(self, model: BaseModel) -> BaseModel:
+        assert model is not None
+
+        model_cache = self._model_cache.get_by_internal_id(model.__class__, model._internal_id)
+        if not model_cache:
+            raise RuntimeError(f"Model with internal id {model._internal_id} not found on cache.")
+
+        return model_cache
+
+    def remove(self, model: BaseModel) -> bool:
+        model_cache = self._assert_cache_internal_id(model)
+        model_cache._state = ModelStateMachine.transition(Transition.REMOVE_OBJECT, model_cache._state)
+
+        return model_cache._state == ModelState.DELETED
+
+    def update(self, model: BaseModel) -> bool:
+        model_cache = self._assert_cache_internal_id(model)
+        updated = False
+
+        new_state = ModelStateMachine.transition(Transition.UPDATE_OBJECT, model_cache._state)
+        if new_state in (ModelState.DIRTY, ModelState.NEW):
+            updated = model_cache._update(model)
+            if not updated and new_state == ModelState.DIRTY:
+                new_state = ModelStateMachine.transition(Transition.CLEAN_OBJECT, model_cache._state)
+            elif new_state == ModelState.NEW:
+                model_cache._persist()
+
+        model_cache._state = new_state
+        return updated
+
+    def query(self, query: BaseQuery, force: bool = False) -> List[BaseModel]:
         if not force:
             cached_results = self._query_cache.get(query)
             if cached_results is not None:

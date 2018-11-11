@@ -57,7 +57,8 @@ def pk(key_type: Type[T], default_value: Optional[T] = None, **kwargs):
 class BaseModel(Generic[T]):
     _internal_id: UUID = field(default_factory=uuid4)
     _state: ModelState = field(init=False, repr=False, compare=False, hash=False, default=ModelState.CLEAN)
-    _immutable: List[str] = field(default_factory=lambda: ['_immutable', '_internal_id', '_state', 'primary_keys'],
+    _persistent_values: Dict[str, Any] = field(init=False, repr=False, compare=False, hash=False, default_factory=dict)
+    _immutable: List[str] = field(default_factory=lambda: ['_immutable', '_internal_id', '_state', '_persistent_values'],
                                   repr=False, init=False, compare=False, hash=False)
 
     @staticmethod
@@ -123,7 +124,7 @@ class BaseModel(Generic[T]):
         attrs = set(BaseModel.__get_primary_keys(self.__class__)) | \
             set(BaseModel.__get_typed_fields(self.__class__))
 
-        return {k: getattr(self, k) for k in attrs - set(self._immutable)}
+        return {k: getattr(self, k) for k in (attrs - set(self._immutable))}
 
     def get_children(self, recursive: bool = False, children: List['BaseModel'] = None,
                      top_level: Optional['BaseModel'] = None) -> List['BaseModel']:
@@ -148,6 +149,46 @@ class BaseModel(Generic[T]):
                     children.append(value)
 
         return children
+
+    def _get_modified_values(self, model: 'BaseModel') -> Dict[str, Any]:
+        if model != self:
+            return {}
+
+        return {attr: getattr(model, attr) for attr, value in self._get_mutable_fields().items()
+                if value != getattr(model, attr)}
+
+    def _get_persistent_model(self):
+        model = self.copy()
+
+        for attr, value in self._persistent_values.items():
+            setattr(model, attr, value)
+
+        return model
+
+    def _rollback(self):
+        for attr, value in self._persistent_values.items():
+            setattr(self, attr, value)
+
+        self._persistent_values = {}
+
+    def _persist(self):
+        self._persistent_values = {}
+
+    def _update(self, model: 'BaseModel') -> bool:
+        persistent_model = self._get_persistent_model()
+        modified_values = persistent_model._get_modified_values(model)
+
+        self._persistent_values = {}
+
+        for attr in self._get_mutable_fields():
+            persistent_value = getattr(persistent_model, attr)
+            if attr in modified_values:
+                setattr(self, attr, modified_values[attr])
+                self._persistent_values[attr] = persistent_value
+            else:
+                setattr(self, attr, persistent_value)
+
+        return bool(modified_values)
 
     def __eq__(self, other):
         if other and isinstance(other, type(self)):
