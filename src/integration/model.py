@@ -45,7 +45,6 @@ ValueKey = Union[T, PrimaryKey]
 
 def mdataclass(*args, **kwargs):
     kwargs['eq'] = kwargs.get('eq', False)
-    kwargs['unsafe_hash'] = kwargs.get('unsafe_hash', True)
     return dataclass(*args, **kwargs)
 
 
@@ -142,11 +141,18 @@ class BaseModel(Generic[T]):
             top_level = self
 
         for value in self._get_mutable_fields().values():
-            if isinstance(value, BaseModel) and value not in children:
-                if recursive:
-                    value.get_children(recursive, children, top_level)
-                else:
-                    children.append(value)
+            def check(child):
+                if isinstance(child, BaseModel) and child not in children:
+                    if recursive:
+                        child.get_children(recursive, children, top_level)
+                    else:
+                        children.append(child)
+
+            if isinstance(value, list) or isinstance(value, set):
+                for item in value:
+                    check(item)
+            else:
+                check(value)
 
         return children
 
@@ -195,3 +201,6 @@ class BaseModel(Generic[T]):
             return self._internal_id == other._internal_id
 
         return False
+
+    def __hash__(self):
+        return hash(str(self._internal_id))

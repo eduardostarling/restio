@@ -1,7 +1,16 @@
 from __future__ import annotations
-from typing import List, Set, Dict, Optional
-import itertools
+from typing import List, Set, Dict, Tuple, Deque, Optional, Generator, \
+    Coroutine, Callable, Any, cast
+from enum import Enum
+from collections import deque
+import asyncio
 
+# As a design decision, the classes in this file are bound to BaseModel
+# to facilitate the navigation across different objects by utilizing
+# the already built-in functionality get_children() and to allow monitoring
+# of model states. If future implementation depends on drawing dependency
+# graphs, then this file should be modified to decouple from BaseModel
+# implementation. The node objects in this case will have to be Hashable.
 from .model import BaseModel
 
 
@@ -16,18 +25,30 @@ class Node:
         self.parents = parents if parents else set()
         self.children = children if children else set()
 
-    def get_children(self, recursive: bool = False):
+    def _get_nodes(self, nodes_attribute: str, recursive: bool = False, nodes: Optional[Set['Node']] = None) -> Set['Node']:
+        dependent_nodes = getattr(self, nodes_attribute, [])
+
         if not recursive:
-            return self.children.copy()
+            return dependent_nodes.copy()
 
-        children: Set[Node] = self.children.copy()
-        for child in self.children:
-            children = children.union(child.get_children(recursive))
+        if not nodes:
+            nodes = set()
 
-        return children
+        for node in dependent_nodes:
+            if node not in nodes:
+                nodes.add(node)
+                nodes = nodes.union(node._get_nodes(nodes_attribute, recursive, nodes))
+
+        return nodes
+
+    def get_children(self, recursive: bool = False, children: Optional[Set['Node']] = None) -> Set['Node']:
+        return self._get_nodes('children', recursive=recursive, nodes=children)
+
+    def get_parents(self, recursive: bool = False, parents: Optional[Set['Node']] = None) -> Set['Node']:
+        return self._get_nodes('parents', recursive=recursive, nodes=parents)
 
     def __hash__(self):
-        return hash(self.node_object._internal_id)
+        return self.node_object.__hash__()
 
     def __eq__(self, other):
         if not isinstance(other, Node):
@@ -36,72 +57,151 @@ class Node:
         if not self.node_object or not other.node_object:
             return False
 
-        return self.node_object._internal_id == other.node_object._internal_id
+        return self.node_object.__hash__() == other.node_object.__hash__()
+
+
+GetRelativesCallable = Callable[[Node, bool, Optional[Set[Node]]], Set[Node]]
+CallbackCoroutineCallable = Callable[[], Coroutine[Any, Any, Tuple[Node, Any]]]
+
+
+class NavigationDirection(Enum):
+    ROOTS_TO_LEAFS: Tuple[GetRelativesCallable, GetRelativesCallable] = (Node.get_parents, Node.get_children)
+    LEAFS_TO_ROOTS: Tuple[GetRelativesCallable, GetRelativesCallable] = (Node.get_children, Node.get_parents)
 
 
 class Tree:
-    roots: Set[Node]
+    nodes: Set[Node]
 
-    def __init__(self, roots: Set[Node]):
-        self.roots = roots
+    def __init__(self, nodes: Set[Node]):
+        self.nodes = nodes
 
-    def get_independent_nodes(self):
-        pass
+    @staticmethod
+    def _get_tree_roots(tree_nodes: Set[Node]) -> Set[Node]:
+        return set(filter(lambda x: not x.parents, tree_nodes))
+
+    @staticmethod
+    def _get_tree_leafs(tree_nodes: Set[Node]) -> Set[Node]:
+        return set(filter(lambda x: not x.children, tree_nodes))
+
+    def get_roots(self):
+        return self._get_tree_roots(self.nodes)
+
+    def get_leafs(self):
+        return self._get_tree_leafs(self.nodes)
+
+    async def process(self, nodes_tasks: Set[Tuple[Node, Optional[CallbackCoroutineCallable]]],
+                      direction: NavigationDirection) -> Deque[Any]:
+
+        task_map = {node: task for node, task in nodes_tasks}
+        nodes = set(task_map.keys())
+        triggered_tasks = set()
+        processed_nodes: Deque[Node] = deque()
+        returned_values: Deque[Any] = deque()
+
+        loop = asyncio.get_event_loop()
+
+        for node in self.navigate(nodes, direction, processed_nodes):
+            if isinstance(node, Node):
+                coroutine = task_map.get(node, None)
+                if coroutine:
+                    triggered_tasks.add(loop.create_task(coroutine()))
+            elif triggered_tasks:
+                done, pending = await asyncio.wait(triggered_tasks, return_when=asyncio.FIRST_COMPLETED)
+                for completed_task in done:
+                    triggered_tasks.remove(completed_task)
+                    node, coroutine_value = await completed_task
+                    processed_nodes.appendleft(node)
+                    returned_values.appendleft(coroutine_value)
+
+        return returned_values
+
+    def get_nodes(self):
+        return self.nodes.copy()
+
+    def navigate(self, nodes: Set[Node], direction: NavigationDirection,
+                 processed_nodes: Deque[Node]) -> Generator[Optional[Node], Node, bool]:
+
+        if direction == NavigationDirection.LEAFS_TO_ROOTS:
+            entrypoint = self.get_leafs()
+        elif direction == NavigationDirection.ROOTS_TO_LEAFS:
+            entrypoint = self.get_roots()
+        else:
+            raise TypeError("The provided argument `direction` is invalid.")
+
+        from_direction, to_direction = direction.value
+        next_nodes = deque(set(filter(lambda n: n in nodes, entrypoint)))
+
+        while nodes or next_nodes:
+            yield next_nodes.pop() if next_nodes else None
+            processed = processed_nodes.pop() if processed_nodes else None
+
+            if isinstance(processed, Node):
+                if processed not in nodes:
+                    return False
+                nodes.remove(processed)
+
+                nodes_to_direction = to_direction(processed) if processed else set()
+                for node_to in nodes_to_direction:
+                    nodes_from_direction = from_direction(node_to)
+                    if not nodes_from_direction.intersection(nodes):
+                        next_nodes.appendleft(node_to)
+        return True
 
 
 class DependencyGraph:
-    trees: List[Tree]
+    trees: List[Tree] = []
 
     def __init__(self, trees: List[Tree]):
         self.trees = trees
 
-    @classmethod
-    def generate_from_objects(cls, objects: List[BaseModel]) -> 'DependencyGraph':
-        nodes: Dict[int, Node] = {}
-        roots: Dict[Node, Set[Node]] = {}
-        trees: List[Tree] = []
+    @staticmethod
+    def _get_connected_nodes(objects: Set[BaseModel]) -> Set[Node]:
+        nodes: Dict[str, Node] = {}
 
         # creates nodes
-        for node_object in objects:  # type: BaseModel
+        for node_object in objects:
             add_node = Node(node_object)
-            nodes[node_object._internal_id] = add_node
+            nodes[str(node_object.__hash__())] = add_node
 
         # connects nodes
-        for node in nodes.values():  # type: Node
+        for node in nodes.values():
             for child in node.node_object.get_children(recursive=False):
-                child_node = nodes.get(child._internal_id, None)
+                child_node = nodes.get(str(child.__hash__()), None)
                 if not child_node:
                     continue
 
                 node.children.add(child_node)
                 child_node.parents.add(node)
 
-        # finds all trees' roots (nodes with no parents)
+        # check for circular dependency
         for node in nodes.values():
-            if not node.parents:
-                roots[node] = node.get_children(True)
+            all_children = node.get_children(recursive=True)
+            if all_children.intersection(node.get_parents(recursive=False)):
+                raise RuntimeError("Circular dependency detected")
 
-        # finds intersections
-        tree_set = set()
-        roots_set = set(roots.keys())
+        return cast(Set[Node], nodes.values())
 
-        while roots_set:
-            node = roots_set.pop()
-            intersecting_items = set([node])
+    @classmethod
+    def generate_from_objects(cls, objects: Set[BaseModel]) -> 'DependencyGraph':
+        nodes: Set[Node] = cls._get_connected_nodes(objects)
+        roots: Set[Node] = Tree._get_tree_roots(nodes)
+        roots_children: Dict[Node, Set[Node]] = \
+            {root: root.get_children(True) for root in roots}
 
-            for next_root in roots_set:
-                next_root_children = roots[next_root]
-                for root_node in intersecting_items:
-                    compare_children = roots[root_node]
-                    if compare_children.intersection(next_root_children):
-                        intersecting_items.add(next_root)
-                        break
+        trees: List[Tree] = []
 
-            tree_set.add(tuple(intersecting_items))
-            roots_set = roots_set - intersecting_items
+        # generates trees with intersections
+        while roots:
+            root = roots.pop()
+            intersecting_items = set([root]).union(roots_children[root])
+            intersecting_roots = set([root])
+            for next_root in roots:
+                next_root_children = set([next_root]).union(roots_children[next_root])
+                if intersecting_items.intersection(next_root_children):
+                    intersecting_items = intersecting_items.union(next_root_children)
+                    intersecting_roots.add(next_root)
 
-        for tree_roots in tree_set:
-            tree = Tree(set(tree_roots))
-            trees.append(tree)
+            trees.append(Tree(intersecting_items))
+            roots = roots - intersecting_roots
 
         return cls(trees)

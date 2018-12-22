@@ -20,9 +20,12 @@ class ModelCache:
     def reset(self):
         self._cache = {}
 
-    def register(self, obj: BaseModel, force: bool = False) -> bool:
+    def _check_object_type(self, obj: Optional[BaseModel]):
         assert obj is not None
         assert isinstance(obj, BaseModel)
+
+    def register(self, obj: BaseModel, force: bool = False) -> bool:
+        self._check_object_type(obj)
 
         obj_type = obj.__class__
         obj_pk = obj.get_keys()
@@ -42,6 +45,19 @@ class ModelCache:
             return True
 
         return False
+
+    def unregister(self, obj: BaseModel):
+        self._check_object_type(obj)
+
+        obj_type = obj.__class__
+        obj_hash = str(obj._internal_id)
+
+        cached = self.get_by_internal_id(obj.__class__, obj_hash)
+
+        if not cached:
+            raise ValueError(f"Object of type `{obj_type.__name__}` and id `{obj_hash}` not found in cache.")
+
+        del self._cache[str(obj_type.__name__), obj_hash]
 
     def get_type(self, filter_type: Type[BaseModel]) -> Dict[Tuple[str, str], BaseModel]:
         return {(model_type, model_hash): model

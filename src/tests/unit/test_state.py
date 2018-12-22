@@ -1,9 +1,9 @@
-import unittest
+from .base import TestBase
 
 from integration.state import ModelState, Transition, ModelStateMachine
 
 
-class TestModelStateMachine(unittest.TestCase):
+class TestModelStateMachine(TestBase):
 
     def test_get(self):
         next_state_existing = ModelStateMachine.transition(Transition.EXISTING_OBJECT, None)

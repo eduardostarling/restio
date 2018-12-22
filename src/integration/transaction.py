@@ -1,11 +1,13 @@
-from typing import Type, Tuple, List, Dict, Optional, overload, cast
+from typing import Type, Tuple, Set, List, Dict, Optional, Any, Deque, overload, cast
 from copy import deepcopy
+import asyncio
 
 from .cache import ModelCache, QueryCache
 from .model import BaseModel, ValueKey
 from .state import Transition, ModelState, ModelStateMachine
 from .query import BaseQuery
 from .dao import BaseDAO
+from .graph import DependencyGraph, Tree, Node, NavigationDirection, CallbackCoroutineCallable
 
 
 class Transaction:
@@ -54,18 +56,18 @@ class Transaction:
             self._register_model(model, force, register_children)
 
     @overload
-    def get(self, model_type: Type[BaseModel], value: Tuple[ValueKey, ...]) -> Optional[BaseModel]:
+    async def get(self, model_type: Type[BaseModel], value: Tuple[ValueKey, ...]) -> Optional[BaseModel]:
         ...
 
     @overload
-    def get(self, model_type: Type[BaseModel], value: List[ValueKey]) -> Optional[BaseModel]:
+    async def get(self, model_type: Type[BaseModel], value: List[ValueKey]) -> Optional[BaseModel]:
         ...
 
     @overload
-    def get(self, model_type: Type[BaseModel], value: ValueKey) -> Optional[BaseModel]:
+    async def get(self, model_type: Type[BaseModel], value: ValueKey) -> Optional[BaseModel]:
         ...
 
-    def get(self, model_type, value):
+    async def get(self, model_type, value):
         if isinstance(value, list):
             value = tuple(value)
 
@@ -81,7 +83,7 @@ class Transaction:
         if not dao:
             raise RuntimeError(f"DAO for model type {model_type.__name__} not found for this transaction.")
 
-        model = cast(model_type, dao.get(value))
+        model = cast(model_type, await dao.get(value))
         if model:
             model._state = ModelStateMachine.transition(Transition.EXISTING_OBJECT, None)
             self.register_model(model, force=True)
@@ -126,12 +128,100 @@ class Transaction:
         model_cache._state = new_state
         return updated
 
-    def query(self, query: BaseQuery, force: bool = False) -> List[BaseModel]:
+    async def query(self, query: BaseQuery, force: bool = False) -> List[BaseModel]:
         if not force:
             cached_results = self._query_cache.get(query)
             if cached_results is not None:
                 return cached_results
 
-        results = query(self)
+        results = await query(self)
         self.register_query(query, results, force=True)
         return results
+
+    def commit(self):
+        # TODO: test
+        cached_values = set(self._model_cache._cache.values())
+
+        models_to_add: Set[Node] = set(
+            filter(lambda m: m._state == ModelState.NEW, cached_values))
+        models_to_update: Set[Node] = set(
+            filter(lambda m: m._state == ModelState.DIRTY, cached_values))
+        models_to_remove: Set[Node] = set(
+            filter(lambda m: m._state == ModelState.DELETED, cached_values))
+
+        all_models: Set[BaseModel] = models_to_add.union(models_to_update) \
+                                                  .union(models_to_remove)
+
+        # beginning of TODO: optimize by changing architecture
+        # Pre-process to check if all models contain DAO's
+        for model in all_models:
+            dao = self.get_dao(type(model))
+            if dao is None:
+                raise RuntimeError(f"Model of type `{type(model)}` does not contain a DAO.")
+        # end of TODO
+
+        graphs = list(map(lambda m: DependencyGraph.generate_from_objects(m),
+                          (models_to_add, models_to_update, models_to_remove)))
+
+        directions: List[NavigationDirection] = [
+            NavigationDirection.LEAFS_TO_ROOTS,
+            NavigationDirection.LEAFS_TO_ROOTS,
+            NavigationDirection.ROOTS_TO_LEAFS
+        ]
+
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(self._process_all_graphs(graphs, directions))
+
+        for model in all_models:
+            model._persist()
+            model._state = ModelStateMachine.transition(Transition.PERSIST_OBJECT, model._state)
+
+        discarded_models: Set[BaseModel] = set(filter(lambda m: m._state == ModelState.DISCARDED, all_models))
+        for model in discarded_models:
+            self._model_cache.unregister(model)
+
+        # TODO: rollback strategy when things go wrong
+
+    async def _process_all_graphs(self, graphs: List[DependencyGraph], directions: List[NavigationDirection]):
+        for graph, direction in zip(graphs, directions):
+            await self._process_all_trees(graph, direction)
+
+    async def _process_all_trees(self, graph: DependencyGraph, direction: NavigationDirection):
+        loop = asyncio.get_running_loop()  # noqa
+        tasks = [loop.create_task(self._process_tree(tree, direction)) for tree in graph.trees]
+        values: List[Deque[Node]] = []
+        for task in asyncio.as_completed(tasks):
+            values.append(await task)
+
+        return values
+
+    async def _process_tree(self, tree: Tree, direction: NavigationDirection) -> Deque[Node]:
+        nodes_callables = self._get_nodes_callables(tree.get_nodes())
+        return await tree.process(set(nodes_callables.items()), direction)
+
+    def _get_nodes_callables(self, nodes: Set[Node]) -> Dict[Node, Optional[CallbackCoroutineCallable]]:
+        callables = {}
+
+        for node in nodes:
+            model = node.node_object
+            dao = self.get_dao(type(model))
+            if not dao:
+                raise RuntimeError(f"Model of type `{type(model)}` does not contain DAOs.")
+
+            model_callable = None
+
+            def func(target, x) -> CallbackCoroutineCallable:
+                async def dao_call() -> Tuple[Node, Any]:
+                    return x, await target(x.node_object)
+                return dao_call
+
+            if model._state == ModelState.NEW:
+                model_callable = func(dao.add, node)
+            elif model._state == ModelState.DIRTY:
+                model_callable = func(dao.update, node)
+            elif model._state == ModelState.DELETED:
+                model_callable = func(dao.remove, node)
+
+            callables[node] = model_callable
+
+        return callables

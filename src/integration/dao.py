@@ -20,17 +20,17 @@ class BaseDAO:
             self._model_type = model_type
 
     @not_implemented_method
-    def get(self, obj: Tuple[ValueKey]):
+    async def get(self, obj: Tuple[ValueKey]):
         pass
 
     @not_implemented_method
-    def add(self, obj: BaseModel):
+    async def add(self, obj: BaseModel):
         pass
 
     @not_implemented_method
-    def remove(self, obj: BaseModel):
+    async def remove(self, obj: BaseModel):
         pass
 
     @not_implemented_method
-    def update(self, obj: BaseModel):
+    async def update(self, obj: BaseModel):
         pass

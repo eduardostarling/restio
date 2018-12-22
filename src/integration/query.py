@@ -31,8 +31,8 @@ class BaseQuery:
 
         return False
 
-    def __call__(self, transaction: Any = None) -> List[Any]:
-        return self.__function(transaction, *self.__args, **self.__kwargs)
+    async def __call__(self, transaction: Any = None) -> List[Any]:
+        return await self.__function(transaction, *self.__args, **self.__kwargs)
 
 
 def Query(function=None):

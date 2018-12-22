@@ -1,5 +1,5 @@
 from typing import List
-import unittest
+from .base import TestBase
 
 from integration.model import BaseModel, PrimaryKey, pk, mdataclass
 from integration.query import Query
@@ -12,20 +12,20 @@ class Model(BaseModel):
 
 
 @Query
-def SimpleQuery(self) -> List[Model]:
+async def SimpleQuery(self) -> List[Model]:
     m1 = Model(id=PrimaryKey(int, 1))
     m2 = Model(id=PrimaryKey(int, 2))
     return [m1, m2]
 
 
 @Query
-def ArgsQuery(self, arg1: int, arg2: int = 2) -> List[BaseModel]:
+async def ArgsQuery(self, arg1: int, arg2: int = 2) -> List[BaseModel]:
     m1 = Model(id=PrimaryKey(int, arg1))
     m2 = Model(id=PrimaryKey(int, arg2))
     return [m1, m2]
 
 
-class TestModelCache(unittest.TestCase):
+class TestModelCache(TestBase):
 
     def setUp(self):
         self.x = ModelCache()
@@ -76,6 +76,25 @@ class TestModelCache(unittest.TestCase):
         self.assertTrue(self.x.register(m2, True))
         self.assertTrue(self.x.register(m3, True))
 
+    def test_unregister(self):
+        m2 = Model()
+        m2.set_keys(1)
+
+        m3 = Model()
+        m3.set_keys(2)
+
+        m4 = Model()
+        m4.set_keys(3)
+
+        self.assertTrue(self.x.register(m2))
+        self.assertTrue(self.x.register(m3))
+
+        self.x.unregister(m2)
+        with self.assertRaises(ValueError):
+            self.x.unregister(m4)
+
+        self.assertEqual(len(self.x._cache.values()), 1)
+
     def test_get_type(self):
         self.x = ModelCache()
 
@@ -117,15 +136,16 @@ class TestModelCache(unittest.TestCase):
         self.assertEqual(second_ref, third_ref)
 
 
-class TestQueryCache(unittest.TestCase):
-    def setUp(self):
+class TestQueryCache(TestBase):
+    @TestBase.async_test
+    async def setUp(self):
         self.x = QueryCache()
         self.q = SimpleQuery
         self.qa = ArgsQuery(5, 6)
         self.qaa = ArgsQuery(5, 7)
-        self.r = self.q()
-        self.ra = self.qa()
-        self.raa = self.qaa()
+        self.r = await self.q()
+        self.ra = await self.qa()
+        self.raa = await self.qaa()
 
     def test_init(self):
         self.assertDictEqual(self.x._cache, {})

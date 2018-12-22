@@ -1,20 +1,20 @@
 from typing import Tuple
-import unittest
+from .base import TestBase
 
 from integration.query import Query
 
 
 @Query
-def ArgsQuery(self, arg1: int, arg2: int = 2) -> Tuple[str, int]:
+async def ArgsQuery(self, arg1: int, arg2: int = 2) -> Tuple[str, int]:
     return (self, arg2)
 
 
 @Query
-def ArgsQuery2(self, arg1: int, arg2: int = 2) -> Tuple[str, int]:
+async def ArgsQuery2(self, arg1: int, arg2: int = 2) -> Tuple[str, int]:
     return (self, arg2)
 
 
-class TestQueryCache(unittest.TestCase):
+class TestQueryCache(TestBase):
 
     def test_hash(self):
         q = ArgsQuery(arg1=1, arg2=2)
@@ -38,22 +38,23 @@ class TestQueryCache(unittest.TestCase):
 
         self.assertNotEqual(q1, (1, 2))
 
-    def test_query_result(self):
+    @TestBase.async_test
+    async def test_query_result(self):
         q = ArgsQuery(arg1=1, arg2=2)
 
-        self.assertEqual(q("text"), ("text", 2))
+        self.assertEqual(await q("text"), ("text", 2))
 
     def test_invalid_query(self):
         with self.assertRaises(AttributeError):
             @Query
-            def QueryNoSelf(arg1, arg2):
+            async def QueryNoSelf(arg1, arg2):
                 pass
 
             QueryNoSelf(1, 2)
 
         with self.assertRaises(AttributeError):
             @Query
-            def QueryWrongSelf(arg1, arg2, self):
+            async def QueryWrongSelf(arg1, arg2, self):
                 pass
 
             QueryWrongSelf(1, 2, "text")

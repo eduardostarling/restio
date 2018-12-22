@@ -1,5 +1,5 @@
-from typing import Optional
-import unittest
+from typing import List, Optional
+from .base import TestBase
 
 from integration.model import mdataclass, BaseModel, PrimaryKey, pk
 
@@ -41,7 +41,7 @@ class ModelB(BaseModel):
 
 @mdataclass
 class ModelC(BaseModel):
-    ref: Optional[ModelB] = None
+    ref: Optional[List[ModelB]] = None
     d: str = ''
 
 
@@ -55,7 +55,7 @@ class ModelE(BaseModel):
     ref: Optional[ModelD] = None
 
 
-class TestPrimaryKey(unittest.TestCase):
+class TestPrimaryKey(TestBase):
 
     def test_equal(self):
         x = PrimaryKey(int, 1)
@@ -92,7 +92,7 @@ class TestPrimaryKey(unittest.TestCase):
         self.assertIn(type_error, str(ex.exception))
 
 
-class TestModel(unittest.TestCase):
+class TestModel(TestBase):
 
     def test_primary_key_int(self):
         x = ModelSinglePKInt()
@@ -180,11 +180,11 @@ class TestModel(unittest.TestCase):
         b.ref = a
         b.c = 4
 
-        c.ref = b
+        c.ref = [b]
         c.d = "5"
 
         c_c = c.copy()
-        c_b = c_c.ref
+        c_b = c_c.ref[0]
         c_a = c_b.ref
 
         self.assertEqual(c_a.id, 1)
@@ -208,7 +208,7 @@ class TestModel(unittest.TestCase):
         b = ModelB()
         c = ModelC()
 
-        c.ref = b
+        c.ref = [b]
         b.ref = a
 
         all_children = c.get_children(True)
@@ -223,7 +223,7 @@ class TestModel(unittest.TestCase):
         b = ModelB()
         c = ModelC()
 
-        c.ref = b
+        c.ref = set([b])
         b.ref = c
 
         one_child = c.get_children(True)
