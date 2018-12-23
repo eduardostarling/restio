@@ -1,5 +1,7 @@
 from typing import Type, Tuple, Set, List, Dict, Optional, Any, Deque, overload, cast
 from copy import deepcopy
+from enum import Enum
+from collections import deque
 import asyncio
 
 from .cache import ModelCache, QueryCache
@@ -7,18 +9,59 @@ from .model import BaseModel, ValueKey
 from .state import Transition, ModelState, ModelStateMachine
 from .query import BaseQuery
 from .dao import BaseDAO
-from .graph import DependencyGraph, Tree, Node, NavigationDirection, CallbackCoroutineCallable
+from .graph import DependencyGraph, TreeProcessException, Tree, NodeProcessException, Node, \
+    NavigationDirection, CallbackCoroutineCallable
+
+
+class TransactionOperationError(Exception):
+    def __init__(self, error: Exception, model: BaseModel):
+        super().__init__(error)
+        self.model = model
+
+
+class TransactionError(Exception):
+    def __init__(self, errors: Deque[TransactionOperationError], processed_models: Deque[BaseModel]):
+        super().__init__()
+        self.errors = errors
+        self.models = processed_models
+
+
+class PersistencyStrategy(Enum):
+
+    """
+    INTERRUPT_ON_ERROR (default):
+        The transaction will be interrupted if any operation with the
+        server throws an exception. The operations already performed
+        will be persisted on local cache. The commit operation will
+        hang until all running tasks finalize, then a TransactionError
+        is thrown, containing the list of all models that have not been
+        persisted on local cache. This is the recommended approach.
+    """
+    INTERRUPT_ON_ERROR = 0
+
+    """
+    CONTINUE_ON_ERROR:
+        The transaction will continue processing all models in the
+        dependency tree that have been marked for modification. The
+        framework will persist on local cache only the models that
+        have been successfuly synchronized to the remote store. At the
+        end, a TransactionError is thrown, containing the list of all
+        models that have not been persisted on local cache.
+    """
+    CONTINUE_ON_ERROR = 1
 
 
 class Transaction:
     _model_cache: ModelCache
     _query_cache: QueryCache
     _daos: Dict[Type[BaseModel], BaseDAO]
+    _strategy: PersistencyStrategy
 
-    def __init__(self):
+    def __init__(self, strategy=PersistencyStrategy.INTERRUPT_ON_ERROR):
         self._model_cache = ModelCache()
         self._query_cache = QueryCache()
         self._daos = {}
+        self._strategy = strategy
 
     def reset(self):
         self._model_cache.reset()
@@ -138,16 +181,29 @@ class Transaction:
         self.register_query(query, results, force=True)
         return results
 
+    def _get_models_to_add(self, models: Optional[Set[BaseModel]] = None) -> Set[BaseModel]:
+        models = set(self._model_cache._cache.values()) if not models else models
+        return set(filter(lambda m: m._state == ModelState.NEW, models))
+
+    def _get_models_to_update(self, models: Optional[Set[BaseModel]] = None) -> Set[BaseModel]:
+        models = set(self._model_cache._cache.values()) if not models else models
+        return set(filter(lambda m: m._state == ModelState.DIRTY, models))
+
+    def _get_models_to_remove(self, models: Optional[Set[BaseModel]] = None) -> Set[BaseModel]:
+        models = set(self._model_cache._cache.values()) if not models else models
+        return set(filter(lambda m: m._state == ModelState.DELETED, models))
+
+    def get_transaction_models(self, models: Optional[Set[BaseModel]] = None) -> Set[BaseModel]:
+        models = set(self._model_cache._cache.values()) if not models else models
+        return set(filter(lambda m: m._state not in (ModelState.CLEAN, ModelState.DISCARDED), models))
+
     def commit(self):
-        # TODO: test
+        # TODO: test with CONTINUE_ON_ERROR
         cached_values = set(self._model_cache._cache.values())
 
-        models_to_add: Set[Node] = set(
-            filter(lambda m: m._state == ModelState.NEW, cached_values))
-        models_to_update: Set[Node] = set(
-            filter(lambda m: m._state == ModelState.DIRTY, cached_values))
-        models_to_remove: Set[Node] = set(
-            filter(lambda m: m._state == ModelState.DELETED, cached_values))
+        models_to_add = self._get_models_to_add(cached_values)
+        models_to_update = self._get_models_to_update(cached_values)
+        models_to_remove = self._get_models_to_remove(cached_values)
 
         all_models: Set[BaseModel] = models_to_add.union(models_to_update) \
                                                   .union(models_to_remove)
@@ -169,35 +225,75 @@ class Transaction:
             NavigationDirection.ROOTS_TO_LEAFS
         ]
 
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(self._process_all_graphs(graphs, directions))
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(self._process_all_graphs(graphs, directions))
+        except TransactionError:
+            raise
+        finally:
+            discarded_models: Set[BaseModel] = set(filter(lambda m: m._state == ModelState.DISCARDED, all_models))
+            for model in discarded_models:
+                self._model_cache.unregister(model)
 
-        for model in all_models:
+    async def _process_all_graphs(self, graphs: List[DependencyGraph], directions: List[NavigationDirection]):
+        all_processed_models: Deque[BaseModel] = deque()
+        exception_queue: Deque[Exception] = deque()
+        for graph, direction in zip(graphs, directions):
+            try:
+                processed_models = await self._process_all_trees(graph, direction)
+            except TransactionError as ex:
+                processed_models = ex.models
+                exception_queue.extendleft(ex.errors)
+            finally:
+                if processed_models:
+                    all_processed_models.extendleft(processed_models)
+
+        for model in all_processed_models:
             model._persist()
             model._state = ModelStateMachine.transition(Transition.PERSIST_OBJECT, model._state)
 
-        discarded_models: Set[BaseModel] = set(filter(lambda m: m._state == ModelState.DISCARDED, all_models))
-        for model in discarded_models:
-            self._model_cache.unregister(model)
+        if exception_queue:
+            raise TransactionError(exception_queue, all_processed_models)
 
-        # TODO: rollback strategy when things go wrong
-
-    async def _process_all_graphs(self, graphs: List[DependencyGraph], directions: List[NavigationDirection]):
-        for graph, direction in zip(graphs, directions):
-            await self._process_all_trees(graph, direction)
-
-    async def _process_all_trees(self, graph: DependencyGraph, direction: NavigationDirection):
+    async def _process_all_trees(self, graph: DependencyGraph, direction: NavigationDirection) \
+            -> Deque[BaseModel]:
         loop = asyncio.get_running_loop()  # noqa
         tasks = [loop.create_task(self._process_tree(tree, direction)) for tree in graph.trees]
-        values: List[Deque[Node]] = []
+        values: Deque[BaseModel] = deque()
+        errors: Deque[Exception] = deque()
+
         for task in asyncio.as_completed(tasks):
-            values.append(await task)
+            task_value: Optional[Deque[BaseModel]] = None
+            error_value: Optional[Deque[TransactionOperationError]] = None
+            try:
+                task_value = await task
+            except TreeProcessException as ex:
+                if self._strategy == PersistencyStrategy.INTERRUPT_ON_ERROR:
+                    for task in tasks:
+                        if not task.done():
+                            task.cancel()
+
+                error_value = deque(map(
+                    lambda e: TransactionOperationError(e.error, e.node_object),
+                    filter(lambda x: isinstance(x, NodeProcessException), ex.processed_values))
+                )
+                task_value = deque(filter(lambda x: isinstance(x, BaseModel), ex.processed_values))
+
+            finally:
+                if task_value is not None:
+                    values.extendleft(task_value)
+                if error_value is not None:
+                    errors.extendleft(error_value)
+
+        if errors:
+            raise TransactionError(errors, values)
 
         return values
 
-    async def _process_tree(self, tree: Tree, direction: NavigationDirection) -> Deque[Node]:
+    async def _process_tree(self, tree: Tree, direction: NavigationDirection) -> Deque[BaseModel]:
         nodes_callables = self._get_nodes_callables(tree.get_nodes())
-        return await tree.process(set(nodes_callables.items()), direction)
+        return await tree.process(set(nodes_callables.items()), direction,
+                                  self._strategy == PersistencyStrategy.INTERRUPT_ON_ERROR)
 
     def _get_nodes_callables(self, nodes: Set[Node]) -> Dict[Node, Optional[CallbackCoroutineCallable]]:
         callables = {}
@@ -212,7 +308,10 @@ class Transaction:
 
             def func(target, x) -> CallbackCoroutineCallable:
                 async def dao_call() -> Tuple[Node, Any]:
-                    return x, await target(x.node_object)
+                    try:
+                        return x, await target(x.node_object)
+                    except Exception as ex:
+                        raise NodeProcessException(ex, x.node_object)
                 return dao_call
 
             if model._state == ModelState.NEW:

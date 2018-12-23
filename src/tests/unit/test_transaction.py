@@ -7,7 +7,7 @@ from integration.model import BaseModel, PrimaryKey, ValueKey, mdataclass, pk
 from integration.state import ModelState
 from integration.query import Query
 from integration.dao import BaseDAO
-from integration.transaction import Transaction
+from integration.transaction import Transaction, TransactionError
 from integration.graph import DependencyGraph, NavigationDirection
 
 caller = None
@@ -18,6 +18,7 @@ class ModelA(BaseModel):
     key: PrimaryKey[int] = pk(int)
     v: int = 0
     s: str = ""
+    ex: bool = False
     ref: Optional[BaseModel] = None
 
 
@@ -34,6 +35,25 @@ class ModelDAO(BaseDAO):
         await asyncio.sleep(randint(1, 2) / 10000)
         return obj
 
+
+class ModelDAOException(ModelDAO):
+    async def add(self, obj):
+        ret = await super().add(obj)
+        if ret.ex:
+            raise Exception("Add exception")
+        return ret
+
+    async def update(self, obj):
+        ret = await super().add(obj)
+        if ret.ex:
+            raise Exception("Update exception")
+        return ret
+
+    async def remove(self, obj):
+        ret = await super().remove(obj)
+        if ret.ex:
+            raise Exception("Remove exception")
+        return ret
 
 @Query
 async def SimpleQuery(self, test_case: 'TestTransaction') -> List[ModelA]:
@@ -434,6 +454,35 @@ class TestTransaction(TestBase):
             models_removed = set(filter(lambda m: m._state == ModelState.DELETED, models))
             self.assertEqual(len(set(models_in_cache).intersection(models_removed)), 0)
 
+    def test_commit_exception(self):
+        a, b, c, d, e, f = models = list(self.get_models_complex())
+
+        x = Transaction()
+        x.register_dao(ModelDAOException(ModelA))
+
+        f._state = ModelState.NEW
+        e._state = ModelState.NEW
+        d._state = ModelState.DIRTY
+        b._state = ModelState.DELETED
+        a._state = ModelState.DELETED
+        a.ex = True
+
+        for model in models:
+            x.register_model(model)
+
+        with self.assertRaises(TransactionError) as error:
+            x.commit()
+
+        ex = error.exception
+
+        a_cache, b_cache = [x._model_cache.get_by_internal_id(ModelA, y._internal_id) for y in [a, b]]
+        self.assertIsNone(b_cache)
+        self.assertIsNotNone(a_cache)
+        self.assertEqual(a_cache._state, ModelState.DELETED)
+
+        self.assertSetEqual(set(ex.models), set([f, e, d, b]))
+        self.assertEqual(len(ex.errors), 1)
+        self.assertEqual(ex.errors[0].model, a)
 
     @TestBase.async_test
     async def test_process_all_trees(self):
@@ -447,9 +496,8 @@ class TestTransaction(TestBase):
 
         y = DependencyGraph.generate_from_objects(models)
 
-        processed_queues = await x._process_all_trees(y, NavigationDirection.LEAFS_TO_ROOTS)
-        for queue in processed_queues:
-            models = models.difference(set(queue))
+        processed_models = await x._process_all_trees(y, NavigationDirection.LEAFS_TO_ROOTS)
+        models = models.difference(set(processed_models))
 
         self.assertEqual(len(models), 0)
 

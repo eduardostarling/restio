@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import List, Set, Dict, Tuple, Deque, Optional, Generator, \
-    Coroutine, Callable, Any, cast
+    Coroutine, Callable, Union, Any, cast
 from enum import Enum
 from collections import deque
 import asyncio
@@ -69,6 +69,19 @@ class NavigationDirection(Enum):
     LEAFS_TO_ROOTS: Tuple[GetRelativesCallable, GetRelativesCallable] = (Node.get_children, Node.get_parents)
 
 
+class NodeProcessException(Exception):
+    def __init__(self, error: Exception, node_object: BaseModel):
+        super().__init__(error)
+        self.error = error
+        self.node_object = node_object
+
+
+class TreeProcessException(Exception):
+    def __init__(self, processed_values: Deque[Union[Any, NodeProcessException]]):
+        super().__init__()
+        self.processed_values = processed_values
+
+
 class Tree:
     nodes: Set[Node]
 
@@ -90,13 +103,14 @@ class Tree:
         return self._get_tree_leafs(self.nodes)
 
     async def process(self, nodes_tasks: Set[Tuple[Node, Optional[CallbackCoroutineCallable]]],
-                      direction: NavigationDirection) -> Deque[Any]:
+                      direction: NavigationDirection, cancel_on_error: bool = True) -> Deque[Any]:
 
         task_map = {node: task for node, task in nodes_tasks}
         nodes = set(task_map.keys())
         triggered_tasks = set()
         processed_nodes: Deque[Node] = deque()
-        returned_values: Deque[Any] = deque()
+        returned_values: Deque[Union[Any, NodeProcessException]] = deque()
+        error_flag: bool = False
 
         loop = asyncio.get_event_loop()
 
@@ -109,9 +123,23 @@ class Tree:
                 done, pending = await asyncio.wait(triggered_tasks, return_when=asyncio.FIRST_COMPLETED)
                 for completed_task in done:
                     triggered_tasks.remove(completed_task)
-                    node, coroutine_value = await completed_task
-                    processed_nodes.appendleft(node)
-                    returned_values.appendleft(coroutine_value)
+                    processed_node: Optional[Node] = None
+                    try:
+                        processed_node, coroutine_value = await completed_task
+                    except NodeProcessException as ex:
+                        error_flag = True
+                        coroutine_value = ex
+                        if not cancel_on_error:
+                            processed_node = ex.node
+                    finally:
+                        if processed_node:
+                            processed_nodes.appendleft(processed_node)
+                        returned_values.appendleft(coroutine_value)
+            elif not processed_nodes:
+                break
+
+        if error_flag:
+            raise TreeProcessException(returned_values)
 
         return returned_values
 
