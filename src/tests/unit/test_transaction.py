@@ -460,6 +460,18 @@ class TestTransaction(TestBase):
 
         self.assertEqual(cached_a._state, ModelState.DELETED)
 
+    def test_check_deleted_models(self):
+        a, b, c = models = self.get_models()
+        a._state = ModelState.DELETED
+        b._state = ModelState.DELETED
+
+        x = Transaction()
+        with self.assertRaises(RuntimeError):
+            x._check_deleted_models(models)
+
+        c._state = ModelState.DELETED
+        x._check_deleted_models()
+
     def test_commit(self):
         for i in range(30):
             models = set(self.get_models_complex())
@@ -567,7 +579,6 @@ class TestTransaction(TestBase):
                             errors_when_ignored, not_processed_when_ignored)
 
         self._check_exception_strategies(models, PersistencyStrategy.CONTINUE_ON_ERROR, expected_ignored)
-
 
     @TestBase.async_test
     async def test_process_all_trees(self):

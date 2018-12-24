@@ -242,6 +242,10 @@ class DependencyGraph:
     @classmethod
     def generate_from_objects(cls, objects: Set[BaseModel]) -> 'DependencyGraph':
         nodes: Set[Node] = cls._get_connected_nodes(objects)
+        return cls.generate_from_nodes(nodes)
+
+    @classmethod
+    def generate_from_nodes(cls, nodes: Set[Node]) -> 'DependencyGraph':
         roots: Set[Node] = Tree._get_tree_roots(nodes)
         roots_children: Dict[Node, Set[Node]] = \
             {root: root.get_children(True) for root in roots}

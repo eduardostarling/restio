@@ -181,24 +181,36 @@ class Transaction:
         self.register_query(query, results, force=True)
         return results
 
-    def _get_models_to_add(self, models: Optional[Set[BaseModel]] = None) -> Set[BaseModel]:
+    def _get_models_by_state(self, state: ModelState, models: Optional[Set[BaseModel]] = None):
         models = set(self._model_cache._cache.values()) if not models else models
-        return set(filter(lambda m: m._state == ModelState.NEW, models))
+        return set([model for model in models if model._state == state])
+
+    def _get_models_to_add(self, models: Optional[Set[BaseModel]] = None) -> Set[BaseModel]:
+        return self._get_models_by_state(ModelState.NEW, models)
 
     def _get_models_to_update(self, models: Optional[Set[BaseModel]] = None) -> Set[BaseModel]:
-        models = set(self._model_cache._cache.values()) if not models else models
-        return set(filter(lambda m: m._state == ModelState.DIRTY, models))
+        return self._get_models_by_state(ModelState.DIRTY, models)
 
     def _get_models_to_remove(self, models: Optional[Set[BaseModel]] = None) -> Set[BaseModel]:
-        models = set(self._model_cache._cache.values()) if not models else models
-        return set(filter(lambda m: m._state == ModelState.DELETED, models))
+        return self._get_models_by_state(ModelState.DELETED, models)
 
     def get_transaction_models(self, models: Optional[Set[BaseModel]] = None) -> Set[BaseModel]:
         models = set(self._model_cache._cache.values()) if not models else models
-        return set(filter(lambda m: m._state not in (ModelState.CLEAN, ModelState.DISCARDED), models))
+        return set([model for model in models if model._state not in (ModelState.CLEAN, ModelState.DISCARDED)])
+
+    def _check_deleted_models(self, models: Optional[Set[BaseModel]] = None):
+        models = set(self._model_cache._cache.values()) if not models else models
+        nodes = DependencyGraph._get_connected_nodes(models)
+        for node in nodes:
+            model: BaseModel = node.node_object
+            if model._state == ModelState.DELETED:
+                for parent_node in node.get_parents(recursive=True):
+                    parent_model: BaseModel = parent_node.node_object
+                    if parent_model._state not in (ModelState.DELETED, ModelState.DISCARDED):
+                        raise RuntimeError("Inconsistent tree. Models that are referred by "
+                                           "other models cannot be deleted.")
 
     def commit(self):
-        # TODO: test with CONTINUE_ON_ERROR
         cached_values = set(self._model_cache._cache.values())
 
         models_to_add = self._get_models_to_add(cached_values)
@@ -215,6 +227,8 @@ class Transaction:
             if dao is None:
                 raise RuntimeError(f"Model of type `{type(model)}` does not contain a DAO.")
         # end of TODO
+
+        self._check_deleted_models(models_to_remove)
 
         # add, update and remove get one graph each, as
         # each level needs to be completely finished in
