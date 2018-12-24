@@ -216,6 +216,9 @@ class Transaction:
                 raise RuntimeError(f"Model of type `{type(model)}` does not contain a DAO.")
         # end of TODO
 
+        # add, update and remove get one graph each, as
+        # each level needs to be completely finished in
+        # order for the next to proceed
         graphs = list(map(lambda m: DependencyGraph.generate_from_objects(m),
                           (models_to_add, models_to_update, models_to_remove)))
 
@@ -225,33 +228,47 @@ class Transaction:
             NavigationDirection.ROOTS_TO_LEAFS
         ]
 
-        loop = asyncio.new_event_loop()
+        loop = asyncio.get_event_loop()
         try:
             loop.run_until_complete(self._process_all_graphs(graphs, directions))
         except TransactionError:
             raise
         finally:
+            # clean up models that were discarded
             discarded_models: Set[BaseModel] = set(filter(lambda m: m._state == ModelState.DISCARDED, all_models))
             for model in discarded_models:
                 self._model_cache.unregister(model)
 
     async def _process_all_graphs(self, graphs: List[DependencyGraph], directions: List[NavigationDirection]):
         all_processed_models: Deque[BaseModel] = deque()
-        exception_queue: Deque[Exception] = deque()
+        exception_queue: Deque[TransactionOperationError] = deque()
         for graph, direction in zip(graphs, directions):
             try:
+                # processes next level, one at a time
                 processed_models = await self._process_all_trees(graph, direction)
             except TransactionError as ex:
                 processed_models = ex.models
                 exception_queue.extendleft(ex.errors)
+                # INTERRUPT_ON_ERROR will only allow trees on the same
+                # graph to finalize their on going processes - therefore
+                # further levels need to be skipped
+                if self._strategy == PersistencyStrategy.INTERRUPT_ON_ERROR:
+                    break
+                # CONTINUE_ON_ERROR will keep going - this statement is
+                # superfluous, but was placed to make the operation explicit
+                elif self._strategy == PersistencyStrategy.CONTINUE_ON_ERROR:
+                    continue
             finally:
+                # keeps record of all processed models, in order
                 if processed_models:
                     all_processed_models.extendleft(processed_models)
 
+        # processed models are persisted into cache
         for model in all_processed_models:
             model._persist()
             model._state = ModelStateMachine.transition(Transition.PERSIST_OBJECT, model._state)
 
+        # propagates exception if exists
         if exception_queue:
             raise TransactionError(exception_queue, all_processed_models)
 
@@ -260,31 +277,38 @@ class Transaction:
         loop = asyncio.get_running_loop()  # noqa
         tasks = [loop.create_task(self._process_tree(tree, direction)) for tree in graph.trees]
         values: Deque[BaseModel] = deque()
-        errors: Deque[Exception] = deque()
+        errors: Deque[TransactionOperationError] = deque()
 
         for task in asyncio.as_completed(tasks):
             task_value: Optional[Deque[BaseModel]] = None
             error_value: Optional[Deque[TransactionOperationError]] = None
             try:
+                # awaits each tree to be processed
                 task_value = await task
             except TreeProcessException as ex:
+                # the awaiting task that triggered the exception needs
+                # to be post-processed so all errors and already processed
+                # models are collected
+                error_value = deque([
+                    TransactionOperationError(e.error, e.node.node_object)
+                    for e in ex.processed_values if isinstance(e, NodeProcessException)
+                ])
+                task_value = deque([x for x in ex.processed_values if isinstance(x, BaseModel)])
+
+                # INTERRUPT_ON_ERROR will send a cancellation signal to all trees
+                # in graph if one tree triggers an exception - trees will finalize
+                # their on going business and return the processed models on the
+                # await statement
                 if self._strategy == PersistencyStrategy.INTERRUPT_ON_ERROR:
-                    for task in tasks:
-                        if not task.done():
-                            task.cancel()
-
-                error_value = deque(map(
-                    lambda e: TransactionOperationError(e.error, e.node_object),
-                    filter(lambda x: isinstance(x, NodeProcessException), ex.processed_values))
-                )
-                task_value = deque(filter(lambda x: isinstance(x, BaseModel), ex.processed_values))
-
+                    for tree in graph.trees:
+                        tree.cancel()
             finally:
                 if task_value is not None:
                     values.extendleft(task_value)
                 if error_value is not None:
                     errors.extendleft(error_value)
 
+        # propagates exception if exists
         if errors:
             raise TransactionError(errors, values)
 
@@ -311,7 +335,7 @@ class Transaction:
                     try:
                         return x, await target(x.node_object)
                     except Exception as ex:
-                        raise NodeProcessException(ex, x.node_object)
+                        raise NodeProcessException(ex, x)
                 return dao_call
 
             if model._state == ModelState.NEW:

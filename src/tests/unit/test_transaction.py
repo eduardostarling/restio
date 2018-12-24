@@ -7,7 +7,7 @@ from integration.model import BaseModel, PrimaryKey, ValueKey, mdataclass, pk
 from integration.state import ModelState
 from integration.query import Query
 from integration.dao import BaseDAO
-from integration.transaction import Transaction, TransactionError
+from integration.transaction import Transaction, TransactionError, PersistencyStrategy
 from integration.graph import DependencyGraph, NavigationDirection
 
 caller = None
@@ -105,6 +105,38 @@ class TestTransaction(TestBase):
         f = ModelA(key=PrimaryKey(int, 6), v=66, ref=d)
 
         return (a, b, c, d, e, f)
+
+    def get_models_strategy(self):
+        """
+        A   C   E   G   I
+        |   |   |   |   |
+        B   D   F   H   J
+        """
+        b = ModelA(key=PrimaryKey(int, 2), v=22)
+        a = ModelA(key=PrimaryKey(int, 1), v=11, ref=b)
+        d = ModelA(key=PrimaryKey(int, 4), v=44, ex=True)
+        c = ModelA(key=PrimaryKey(int, 3), v=33, ref=d)
+        f = ModelA(key=PrimaryKey(int, 6), v=66)
+        e = ModelA(key=PrimaryKey(int, 5), v=55, ref=f)
+        h = ModelA(key=PrimaryKey(int, 8), v=88)
+        g = ModelA(key=PrimaryKey(int, 7), v=77, ref=h)
+        j = ModelA(key=PrimaryKey(int, 10), v=100)
+        i = ModelA(key=PrimaryKey(int, 9), v=99, ref=j)
+
+        models = tuple([a, b, c, d, e, f, g, h, i, j])
+
+        for model in models[0:6]:
+            model._state = ModelState.DIRTY
+
+        # To add
+        g._state = ModelState.NEW
+        h._state = ModelState.NEW
+
+        # To remove
+        i._state = ModelState.DELETED
+        j._state = ModelState.DELETED
+
+        return models
 
     def test_init(self):
         x = Transaction()
@@ -457,7 +489,7 @@ class TestTransaction(TestBase):
     def test_commit_exception(self):
         a, b, c, d, e, f = models = list(self.get_models_complex())
 
-        x = Transaction()
+        x = Transaction(strategy=PersistencyStrategy.INTERRUPT_ON_ERROR)
         x.register_dao(ModelDAOException(ModelA))
 
         f._state = ModelState.NEW
@@ -483,6 +515,59 @@ class TestTransaction(TestBase):
         self.assertSetEqual(set(ex.models), set([f, e, d, b]))
         self.assertEqual(len(ex.errors), 1)
         self.assertEqual(ex.errors[0].model, a)
+
+    def _check_exception_strategies(self, models, strategy, expected):
+        x = Transaction(strategy=strategy)
+        x.register_dao(ModelDAOException(ModelA))
+
+        for model in models:
+            x.register_model(model)
+
+        with self.assertRaises(TransactionError) as error:
+            x.commit()
+
+        ex = error.exception
+        expected_processed, maybe_processed, expected_errors, expected_not_processed = expected
+        processed_models = set(ex.models)
+        error_models = set([e.model for e in ex.errors])
+        pending_models = x.get_transaction_models()
+
+        # A model that may have been processed is either processed or
+        # pending. Intersecting both processed and pending lists should
+        # then cover them all
+        expected_processed_or_pending = maybe_processed.intersection(processed_models).union(
+            maybe_processed.intersection(pending_models)
+        )
+
+        self.assertEqual(expected_processed.intersection(processed_models), expected_processed)
+        self.assertEqual(maybe_processed, expected_processed_or_pending)
+        self.assertSetEqual(expected_errors, error_models)
+        self.assertSetEqual(expected_not_processed, pending_models)
+
+    def test_commit_exception_interrupt_on_error(self):
+        a, b, c, d, e, f, g, h, i, j = models = self.get_models_strategy()
+
+        processed_when_canceled = set([b, e, g, h])
+        maybe_processed_when_canceled = set([a, e])
+        errors_when_canceled = set([d])
+        not_processed_when_canceled = set([c, d, i, j])
+        expected_canceled = (processed_when_canceled, maybe_processed_when_canceled,
+                             errors_when_canceled, not_processed_when_canceled)
+
+        self._check_exception_strategies(models, PersistencyStrategy.INTERRUPT_ON_ERROR, expected_canceled)
+
+    def test_commit_exception_continue_on_error(self):
+        a, b, c, d, e, f, g, h, i, j = models = self.get_models_strategy()
+
+        processed_when_ignored = set(models).difference(set([d]))
+        maybe_processed_when_ignored = set()
+        errors_when_ignored = set([d])
+        not_processed_when_ignored = errors_when_ignored
+        expected_ignored = (processed_when_ignored, maybe_processed_when_ignored,
+                            errors_when_ignored, not_processed_when_ignored)
+
+        self._check_exception_strategies(models, PersistencyStrategy.CONTINUE_ON_ERROR, expected_ignored)
+
 
     @TestBase.async_test
     async def test_process_all_trees(self):

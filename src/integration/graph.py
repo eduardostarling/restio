@@ -70,10 +70,10 @@ class NavigationDirection(Enum):
 
 
 class NodeProcessException(Exception):
-    def __init__(self, error: Exception, node_object: BaseModel):
+    def __init__(self, error: Exception, node: Node):
         super().__init__(error)
         self.error = error
-        self.node_object = node_object
+        self.node = node
 
 
 class TreeProcessException(Exception):
@@ -84,9 +84,13 @@ class TreeProcessException(Exception):
 
 class Tree:
     nodes: Set[Node]
+    _canceled: bool
+    _processing: bool
 
     def __init__(self, nodes: Set[Node]):
         self.nodes = nodes
+        self._canceled = False
+        self._processing = False
 
     @staticmethod
     def _get_tree_roots(tree_nodes: Set[Node]) -> Set[Node]:
@@ -105,6 +109,9 @@ class Tree:
     async def process(self, nodes_tasks: Set[Tuple[Node, Optional[CallbackCoroutineCallable]]],
                       direction: NavigationDirection, cancel_on_error: bool = True) -> Deque[Any]:
 
+        self._processing = True
+        self._canceled = False
+
         task_map = {node: task for node, task in nodes_tasks}
         nodes = set(task_map.keys())
         triggered_tasks = set()
@@ -115,21 +122,37 @@ class Tree:
         loop = asyncio.get_event_loop()
 
         for node in self.navigate(nodes, direction, processed_nodes):
+            # new node is available to be processed, so
+            # add it to the task set
             if isinstance(node, Node):
                 coroutine = task_map.get(node, None)
-                if coroutine:
+                # if cancellation has been flagged, then
+                # don't schedule any extra task
+                if coroutine and not self._canceled:
                     triggered_tasks.add(loop.create_task(coroutine()))
+
+            # no more node processes to be scheduled, so
+            # wait for current running tasks and process
+            # the next completed one
             elif triggered_tasks:
                 done, pending = await asyncio.wait(triggered_tasks, return_when=asyncio.FIRST_COMPLETED)
                 for completed_task in done:
-                    triggered_tasks.remove(completed_task)
+                    triggered_tasks.remove(completed_task)  # type: ignore
                     processed_node: Optional[Node] = None
                     try:
                         processed_node, coroutine_value = await completed_task
                     except NodeProcessException as ex:
                         error_flag = True
                         coroutine_value = ex
-                        if not cancel_on_error:
+
+                        # when the error occurs, then we queue the exception
+                        # instead of the regular return value from the task,
+                        # if cancellation is not in place, to keep the tree
+                        # going - we set the cancel state otherwise, so no
+                        # further dependent nodes get scheduled
+                        if cancel_on_error:
+                            self.cancel()
+                        else:
                             processed_node = ex.node
                     finally:
                         if processed_node:
@@ -137,6 +160,9 @@ class Tree:
                         returned_values.appendleft(coroutine_value)
             elif not processed_nodes:
                 break
+
+        self._canceled = False
+        self._processing = False
 
         if error_flag:
             raise TreeProcessException(returned_values)
@@ -174,6 +200,10 @@ class Tree:
                     if not nodes_from_direction.intersection(nodes):
                         next_nodes.appendleft(node_to)
         return True
+
+    def cancel(self):
+        if self._processing:
+            self._canceled = True
 
 
 class DependencyGraph:
