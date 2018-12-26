@@ -79,10 +79,16 @@ class Transaction:
     def _register_model(self, model: BaseModel, force: bool = False, register_children: bool = True):
         self._model_cache.register(model, force)
 
+        children = model.get_children(recursive=True)
         if register_children:
-            children = model.get_children(recursive=True)
             for child in children:
                 self._model_cache.register(child, force)
+        elif children:
+            for child in children:
+                if not self._model_cache.get_by_internal_id(child.__class__, child._internal_id):
+                    raise RuntimeError(f"Model of id `{child._internal_id}` ({child.__class__.__name__}) "
+                                       f"is a child of `{model._internal_id}` ({model.__class__.__name__})"
+                                       " and is not registered in cache.")
 
     def register_model(self, model: BaseModel, force: bool = False, register_children: bool = True):
         if not model:
@@ -136,10 +142,23 @@ class Transaction:
     def add(self, model: BaseModel) -> bool:
         assert model is not None
 
+        model_cache = self._model_cache.get_by_internal_id(model.__class__, model._internal_id)
+        if model_cache:
+            raise RuntimeError(f"Model of id `{model._internal_id}` is already registered in"
+                               " internal cache.")
+
+        keys = model.get_keys()
+        if keys:
+            model_cache = self._model_cache.get(model.__class__, keys)
+            if model_cache:
+                raise RuntimeError(f"Model with keys `{keys}` is already registered in"
+                                   " internal cache.")
+
         model_copy = model.copy()
         model_copy._state = ModelStateMachine.transition(Transition.ADD_OBJECT, None)
+        self._register_model(model_copy, force=False, register_children=False)
 
-        return self._model_cache.register(model_copy)
+        return model_copy._state == ModelState.NEW
 
     def _assert_cache_internal_id(self, model: BaseModel) -> BaseModel:
         assert model is not None
@@ -178,11 +197,11 @@ class Transaction:
                 return cached_results
 
         results = await query(self)
-        self.register_query(query, results, force=True)
+        self.register_query(query, results, force=False)
         return results
 
     def _get_models_by_state(self, state: ModelState, models: Optional[Set[BaseModel]] = None):
-        models = set(self._model_cache._cache.values()) if not models else models
+        models = self._model_cache.get_all_models() if not models else models
         return set([model for model in models if model._state == state])
 
     def _get_models_to_add(self, models: Optional[Set[BaseModel]] = None) -> Set[BaseModel]:
@@ -201,17 +220,15 @@ class Transaction:
     def _check_deleted_models(self, models: Optional[Set[BaseModel]] = None):
         models = set(self._model_cache._cache.values()) if not models else models
         nodes = DependencyGraph._get_connected_nodes(models)
-        for node in nodes:
-            model: BaseModel = node.node_object
-            if model._state == ModelState.DELETED:
-                for parent_node in node.get_parents(recursive=True):
-                    parent_model: BaseModel = parent_node.node_object
-                    if parent_model._state not in (ModelState.DELETED, ModelState.DISCARDED):
-                        raise RuntimeError("Inconsistent tree. Models that are referred by "
-                                           "other models cannot be deleted.")
+        for node in (n for n in nodes if n.node_object._state == ModelState.DELETED):
+            for parent_node in node.get_parents(recursive=True):
+                parent_model: BaseModel = parent_node.node_object
+                if parent_model._state not in (ModelState.DELETED, ModelState.DISCARDED):
+                    raise RuntimeError("Inconsistent tree. Models that are referred by "
+                                       "other models cannot be deleted.")
 
     def commit(self):
-        cached_values = set(self._model_cache._cache.values())
+        cached_values = self._model_cache.get_all_models()
 
         models_to_add = self._get_models_to_add(cached_values)
         models_to_update = self._get_models_to_update(cached_values)
@@ -362,3 +379,11 @@ class Transaction:
             callables[node] = model_callable
 
         return callables
+
+    def rollback(self):
+        for model in self._model_cache.get_all_models():
+            model._state = ModelStateMachine.transition(Transition.ROLLBACK_OBJECT, model._state)
+            if model._state == ModelState.DISCARDED:
+                self._model_cache.unregister(model)
+            else:
+                model._rollback()

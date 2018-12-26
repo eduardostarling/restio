@@ -34,7 +34,7 @@ class ModelStateMachine:
         (Transition.REMOVE_OBJECT, ModelState.DIRTY): ModelState.DELETED,
         (Transition.REMOVE_OBJECT, ModelState.NEW): ModelState.DISCARDED,
         (Transition.ROLLBACK_OBJECT, ModelState.DIRTY): ModelState.CLEAN,
-        (Transition.ROLLBACK_OBJECT, ModelState.NEW): ModelState.CLEAN,
+        (Transition.ROLLBACK_OBJECT, ModelState.NEW): ModelState.DISCARDED,
         (Transition.ROLLBACK_OBJECT, ModelState.DELETED): ModelState.DISCARDED,
     }
 

@@ -1,6 +1,7 @@
 from typing import List, Tuple, Optional
 from .base import TestBase
 from random import randint
+from uuid import uuid4
 import asyncio
 
 from integration.model import BaseModel, PrimaryKey, ValueKey, mdataclass, pk
@@ -54,6 +55,7 @@ class ModelDAOException(ModelDAO):
         if ret.ex:
             raise Exception("Remove exception")
         return ret
+
 
 @Query
 async def SimpleQuery(self, test_case: 'TestTransaction') -> List[ModelA]:
@@ -196,6 +198,10 @@ class TestTransaction(TestBase):
         self.assertEqual(await x.get(ModelA, 1), a)
         self.assertEqual(await x.get(ModelA, 2), b)
         self.assertEqual(await x.get(ModelA, 3), c)
+
+        y = Transaction()
+        with self.assertRaises(RuntimeError):
+            y.register_model(c, register_children=False)
 
         return a, b, c, x
 
@@ -341,9 +347,16 @@ class TestTransaction(TestBase):
     async def test_add(self):
         x = Transaction()
         a, _, _ = self.get_models()
+        a_copy = a.copy()
+        a_copy._internal_id = uuid4()
 
         self.assertTrue(x.add(a))
-        self.assertFalse(x.add(a))
+
+        with self.assertRaises(RuntimeError):
+            x.add(a)
+
+        with self.assertRaises(RuntimeError):
+            x.add(a_copy)
 
         cached_a = await x.get(ModelA, 1)
 
@@ -633,3 +646,48 @@ class TestTransaction(TestBase):
                 node_return, model_return = await coroutine()
                 self.assertEqual(node.node_object, model_return)
                 self.assertEqual(node, node_return)
+
+    @TestBase.async_test
+    async def test_rollback(self):
+        a, b, c, d, e, f = models = list(self.get_models_complex())
+        x = Transaction()
+
+        x.register_model(a)
+        x.register_model(d)
+        x.register_model(f)
+        x.add(b)
+        x.add(c)
+        x.add(e)
+        x.remove(f)
+
+        d.v = 444
+        x.update(d)
+
+        a_cache, b_cache, c_cache, d_cache, e_cache, f_cache = \
+            [await x.get(m.__class__, m.get_keys()) for m in models]
+
+        self.assertEqual(a_cache._state, ModelState.CLEAN)
+        self.assertEqual(b_cache._state, ModelState.NEW)
+        self.assertEqual(c_cache._state, ModelState.NEW)
+        self.assertEqual(d_cache._state, ModelState.DIRTY)
+        self.assertEqual(e_cache._state, ModelState.NEW)
+        self.assertEqual(f_cache._state, ModelState.DELETED)
+
+        self.assertEqual(d_cache, d)
+        self.assertEqual(d_cache.v, 444)
+
+        x.rollback()
+
+        a_cache = await x.get(a.__class__, a.get_keys())
+        d_cache = await x.get(d.__class__, d.get_keys())
+
+        for m in [b, c, e, f]:
+            with self.assertRaises(RuntimeError):
+                await x.get(m.__class__, m.get_keys())
+
+        self.assertEqual(a_cache._state, ModelState.CLEAN)
+        self.assertEqual(d_cache._state, ModelState.CLEAN)
+
+        self.assertEqual(a_cache, a)
+        self.assertEqual(d_cache, d)
+        self.assertEqual(d_cache.v, 44)

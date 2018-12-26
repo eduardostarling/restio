@@ -1,4 +1,4 @@
-from typing import Dict, List, Tuple, Optional, Type, overload
+from typing import Dict, List, Set, Tuple, Optional, Type, overload
 from collections.abc import Hashable
 from uuid import UUID
 
@@ -104,6 +104,9 @@ class ModelCache:
             internal_id = str(internal_id)
 
         return self._cache.get((str(model_type.__name__), internal_id), None)
+
+    def get_all_models(self) -> Set[BaseModel]:
+        return set(self._cache.values())
 
 
 class QueryCache:
