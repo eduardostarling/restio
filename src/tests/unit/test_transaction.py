@@ -4,12 +4,12 @@ from random import randint
 from uuid import uuid4
 import asyncio
 
-from integration.model import BaseModel, PrimaryKey, ValueKey, mdataclass, pk
-from integration.state import ModelState
-from integration.query import Query
-from integration.dao import BaseDAO
-from integration.transaction import Transaction, TransactionError, PersistencyStrategy
-from integration.graph import DependencyGraph, NavigationDirection
+from restio.model import BaseModel, PrimaryKey, ValueKey, mdataclass, pk
+from restio.state import ModelState
+from restio.query import Query
+from restio.dao import BaseDAO
+from restio.transaction import Transaction, TransactionError, PersistencyStrategy
+from restio.graph import DependencyGraph, NavigationDirection
 
 caller = None
 

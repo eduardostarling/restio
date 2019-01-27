@@ -1,7 +1,7 @@
 from typing import Tuple
 from .base import TestBase
 
-from integration.query import Query
+from restio.query import Query
 
 
 @Query

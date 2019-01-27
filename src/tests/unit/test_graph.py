@@ -5,8 +5,8 @@ from .base import TestBase
 import asyncio
 import itertools
 
-from integration.model import BaseModel, mdataclass
-from integration.graph import Node, Tree, DependencyGraph, NavigationDirection
+from restio.model import BaseModel, mdataclass
+from restio.graph import Node, Tree, DependencyGraph, NavigationDirection
 
 
 def async_test(coro):

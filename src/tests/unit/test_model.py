@@ -1,7 +1,7 @@
 from typing import List, Optional
 from .base import TestBase
 
-from integration.model import mdataclass, BaseModel, PrimaryKey, pk
+from restio.model import mdataclass, BaseModel, PrimaryKey, pk
 
 
 @mdataclass

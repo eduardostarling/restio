@@ -4,7 +4,7 @@ from unittest import TestLoader, TextTestRunner
 
 CURRENT_DIRECTORY = os.path.dirname(__file__)
 
-cov = Coverage(source=[os.path.join(CURRENT_DIRECTORY, '../integration/')], data_suffix=False)
+cov = Coverage(source=[os.path.join(CURRENT_DIRECTORY, '../restio/')], data_suffix=False)
 cov.exclude('\.\.\.')  # noqa
 cov.exclude('pass')
 cov.start()

@@ -1,6 +1,6 @@
 from .base import TestBase
 
-from integration.state import ModelState, Transition, ModelStateMachine
+from restio.state import ModelState, Transition, ModelStateMachine
 
 
 class TestModelStateMachine(TestBase):

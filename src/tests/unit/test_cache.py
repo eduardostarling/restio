@@ -1,9 +1,9 @@
 from typing import List
 from .base import TestBase
 
-from integration.model import BaseModel, PrimaryKey, pk, mdataclass
-from integration.query import Query
-from integration.cache import ModelCache, QueryCache
+from restio.model import BaseModel, PrimaryKey, pk, mdataclass
+from restio.query import Query
+from restio.cache import ModelCache, QueryCache
 
 
 @mdataclass
