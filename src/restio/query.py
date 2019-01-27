@@ -48,6 +48,7 @@ def Query(function=None):
     if not keys:
         return BaseQuery(function=function)
     else:
+
         @wraps(function)
         def wrapper(*args, **kwargs):
             return BaseQuery(function, *args, **kwargs)

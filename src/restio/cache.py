@@ -60,9 +60,10 @@ class ModelCache:
         del self._cache[str(obj_type.__name__), obj_hash]
 
     def get_type(self, filter_type: Type[BaseModel]) -> Dict[Tuple[str, str], BaseModel]:
-        return {(model_type, model_hash): model
-                for (model_type, model_hash), model in self._cache.items()
-                if filter_type.__name__ == model_type}
+        return {
+            (model_type, model_hash): model
+            for (model_type, model_hash), model in self._cache.items() if filter_type.__name__ == model_type
+        }
 
     @overload
     def get(self, model_type: Type[BaseModel], value: Tuple[ValueKey, ...]) -> Optional[BaseModel]:
@@ -122,8 +123,7 @@ class QueryCache:
     def reset(self):
         self._cache = {}
 
-    def register(self, obj: BaseQuery, results: List[BaseModel],
-                 force: bool = False) -> bool:
+    def register(self, obj: BaseQuery, results: List[BaseModel], force: bool = False) -> bool:
         assert obj is not None
         assert isinstance(obj, Hashable)
 

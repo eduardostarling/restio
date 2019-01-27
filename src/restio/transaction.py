@@ -27,7 +27,6 @@ class TransactionError(Exception):
 
 
 class PersistencyStrategy(Enum):
-
     """
     INTERRUPT_ON_ERROR (default):
         The transaction will be interrupted if any operation with the
@@ -38,7 +37,6 @@ class PersistencyStrategy(Enum):
         persisted on local cache. This is the recommended approach.
     """
     INTERRUPT_ON_ERROR = 0
-
     """
     CONTINUE_ON_ERROR:
         The transaction will continue processing all models in the
@@ -86,9 +84,11 @@ class Transaction:
         elif children:
             for child in children:
                 if not self._model_cache.get_by_internal_id(child.__class__, child._internal_id):
-                    raise RuntimeError(f"Model of id `{child._internal_id}` ({child.__class__.__name__}) "
-                                       f"is a child of `{model._internal_id}` ({model.__class__.__name__})"
-                                       " and is not registered in cache.")
+                    raise RuntimeError(
+                        f"Model of id `{child._internal_id}` ({child.__class__.__name__}) "
+                        f"is a child of `{model._internal_id}` ({model.__class__.__name__})"
+                        " and is not registered in cache."
+                    )
 
     def register_model(self, model: BaseModel, force: bool = False, register_children: bool = True):
         if not model:
@@ -97,7 +97,9 @@ class Transaction:
         model = model.copy()
         self._register_model(model, force, register_children)
 
-    def register_query(self, query: BaseQuery, models: List[BaseModel], force: bool = False, register_children: bool = True):
+    def register_query(
+        self, query: BaseQuery, models: List[BaseModel], force: bool = False, register_children: bool = True
+    ):
         models = deepcopy(models)
         self._query_cache.register(query, models)
 
@@ -144,15 +146,13 @@ class Transaction:
 
         model_cache = self._model_cache.get_by_internal_id(model.__class__, model._internal_id)
         if model_cache:
-            raise RuntimeError(f"Model of id `{model._internal_id}` is already registered in"
-                               " internal cache.")
+            raise RuntimeError(f"Model of id `{model._internal_id}` is already registered in" " internal cache.")
 
         keys = model.get_keys()
         if keys:
             model_cache = self._model_cache.get(model.__class__, keys)
             if model_cache:
-                raise RuntimeError(f"Model with keys `{keys}` is already registered in"
-                                   " internal cache.")
+                raise RuntimeError(f"Model with keys `{keys}` is already registered in" " internal cache.")
 
         model_copy = model.copy()
         model_copy._state = ModelStateMachine.transition(Transition.ADD_OBJECT, None)
@@ -224,8 +224,10 @@ class Transaction:
             for parent_node in node.get_parents(recursive=True):
                 parent_model: BaseModel = parent_node.node_object
                 if parent_model._state not in (ModelState.DELETED, ModelState.DISCARDED):
-                    raise RuntimeError("Inconsistent tree. Models that are referred by "
-                                       "other models cannot be deleted.")
+                    raise RuntimeError(
+                        "Inconsistent tree. Models that are referred by "
+                        "other models cannot be deleted."
+                    )
 
     def commit(self):
         cached_values = self._model_cache.get_all_models()
@@ -250,13 +252,14 @@ class Transaction:
         # add, update and remove get one graph each, as
         # each level needs to be completely finished in
         # order for the next to proceed
-        graphs = list(map(lambda m: DependencyGraph.generate_from_objects(m),
-                          (models_to_add, models_to_update, models_to_remove)))
+        graphs = list(
+            map(
+                lambda m: DependencyGraph.generate_from_objects(m), (models_to_add, models_to_update, models_to_remove)
+            )
+        )
 
         directions: List[NavigationDirection] = [
-            NavigationDirection.LEAFS_TO_ROOTS,
-            NavigationDirection.LEAFS_TO_ROOTS,
-            NavigationDirection.ROOTS_TO_LEAFS
+            NavigationDirection.LEAFS_TO_ROOTS, NavigationDirection.LEAFS_TO_ROOTS, NavigationDirection.ROOTS_TO_LEAFS
         ]
 
         loop = asyncio.get_event_loop()
@@ -320,10 +323,12 @@ class Transaction:
                 # the awaiting task that triggered the exception needs
                 # to be post-processed so all errors and already processed
                 # models are collected
-                error_value = deque([
-                    TransactionOperationError(e.error, e.node.node_object)
-                    for e in ex.processed_values if isinstance(e, NodeProcessException)
-                ])
+                error_value = deque(
+                    [
+                        TransactionOperationError(e.error, e.node.node_object) for e in ex.processed_values
+                        if isinstance(e, NodeProcessException)
+                    ]
+                )
                 task_value = deque([x for x in ex.processed_values if isinstance(x, BaseModel)])
 
                 # INTERRUPT_ON_ERROR will send a cancellation signal to all trees
@@ -347,8 +352,9 @@ class Transaction:
 
     async def _process_tree(self, tree: Tree, direction: NavigationDirection) -> Deque[BaseModel]:
         nodes_callables = self._get_nodes_callables(tree.get_nodes())
-        return await tree.process(set(nodes_callables.items()), direction,
-                                  self._strategy == PersistencyStrategy.INTERRUPT_ON_ERROR)
+        return await tree.process(
+            set(nodes_callables.items()), direction, self._strategy == PersistencyStrategy.INTERRUPT_ON_ERROR
+        )
 
     def _get_nodes_callables(self, nodes: Set[Node]) -> Dict[Node, Optional[CallbackCoroutineCallable]]:
         callables = {}
@@ -367,6 +373,7 @@ class Transaction:
                         return x, await target(x.node_object)
                     except Exception as ex:
                         raise NodeProcessException(ex, x)
+
                 return dao_call
 
             if model._state == ModelState.NEW:

@@ -19,13 +19,15 @@ class Node:
     parents: Set['Node']
     children: Set['Node']
 
-    def __init__(self, node_object: BaseModel, parents: Optional[Set['Node']] = None,
-                 children: Optional[Set['Node']] = None):
+    def __init__(
+        self, node_object: BaseModel, parents: Optional[Set['Node']] = None, children: Optional[Set['Node']] = None
+    ):
         self.node_object = node_object
         self.parents = parents if parents else set()
         self.children = children if children else set()
 
-    def _get_nodes(self, nodes_attribute: str, recursive: bool = False, nodes: Optional[Set['Node']] = None) -> Set['Node']:
+    def _get_nodes(self, nodes_attribute: str, recursive: bool = False,
+                   nodes: Optional[Set['Node']] = None) -> Set['Node']:
         dependent_nodes = getattr(self, nodes_attribute, [])
 
         if not recursive:
@@ -106,8 +108,12 @@ class Tree:
     def get_leafs(self):
         return self._get_tree_leafs(self.nodes)
 
-    async def process(self, nodes_tasks: Set[Tuple[Node, Optional[CallbackCoroutineCallable]]],
-                      direction: NavigationDirection, cancel_on_error: bool = True) -> Deque[Any]:
+    async def process(
+        self,
+        nodes_tasks: Set[Tuple[Node, Optional[CallbackCoroutineCallable]]],
+        direction: NavigationDirection,
+        cancel_on_error: bool = True
+    ) -> Deque[Any]:
 
         self._processing = True
         self._canceled = False

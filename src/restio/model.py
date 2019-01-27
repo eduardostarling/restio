@@ -57,18 +57,28 @@ class BaseModel(Generic[T]):
     _internal_id: UUID = field(default_factory=uuid4)
     _state: ModelState = field(init=False, repr=False, compare=False, hash=False, default=ModelState.CLEAN)
     _persistent_values: Dict[str, Any] = field(init=False, repr=False, compare=False, hash=False, default_factory=dict)
-    _immutable: List[str] = field(default_factory=lambda: ['_immutable', '_internal_id', '_state', '_persistent_values'],
-                                  repr=False, init=False, compare=False, hash=False)
+    _immutable: List[str] = field(
+        default_factory=lambda: ['_immutable', '_internal_id', '_state', '_persistent_values'],
+        repr=False,
+        init=False,
+        compare=False,
+        hash=False
+    )
 
     @staticmethod
     def __get_primary_keys(cls) -> Dict[str, type]:
-        return {attr: t.__args__[0] for attr, t in get_type_hints(cls).items()
-                if hasattr(t, '__origin__') and t.__origin__ is PrimaryKey}
+        return {
+            attr: t.__args__[0]
+            for attr, t in get_type_hints(cls).items() if hasattr(t, '__origin__') and t.__origin__ is PrimaryKey
+        }
 
     @staticmethod
     def __get_typed_fields(cls) -> Dict[str, type]:
-        return {attr: t for attr, t in get_type_hints(cls).items()
-                if not hasattr(t, '__origin__') or (hasattr(t, '__origin__') and t.__origin__ is not PrimaryKey)}
+        return {
+            attr: t
+            for attr, t in get_type_hints(cls).items()
+            if not hasattr(t, '__origin__') or (hasattr(t, '__origin__') and t.__origin__ is not PrimaryKey)
+        }
 
     def get_primary_keys(self) -> Tuple[PrimaryKey, ...]:
         return tuple([cast(PrimaryKey, getattr(self, key)) for key in self.__get_primary_keys(self)])
@@ -113,7 +123,8 @@ class BaseModel(Generic[T]):
             if not issubclass(attr_types[index], primary_key._type):
                 raise RuntimeError(
                     f'Type {primary_key._type.__name__} on position {index} incompatible' +
-                    ' with {attr_keys[index]} of type {attr_types[index].__name__}')
+                    ' with {attr_keys[index]} of type {attr_types[index].__name__}'
+                )
             setattr(self, attr_keys[index], primary_key)
 
     def copy(self) -> BaseModel:  # noqa: F821
@@ -125,8 +136,9 @@ class BaseModel(Generic[T]):
 
         return {k: getattr(self, k) for k in (attrs - set(self._immutable))}
 
-    def get_children(self, recursive: bool = False, children: List['BaseModel'] = None,
-                     top_level: Optional['BaseModel'] = None) -> List['BaseModel']:
+    def get_children(
+        self, recursive: bool = False, children: List['BaseModel'] = None, top_level: Optional['BaseModel'] = None
+    ) -> List['BaseModel']:
 
         if children is None:
             children = []
@@ -141,6 +153,7 @@ class BaseModel(Generic[T]):
             top_level = self
 
         for value in self._get_mutable_fields().values():
+
             def check(child):
                 if isinstance(child, BaseModel) and child not in children:
                     if recursive:
@@ -160,8 +173,10 @@ class BaseModel(Generic[T]):
         if model != self:
             return {}
 
-        return {attr: getattr(model, attr) for attr, value in self._get_mutable_fields().items()
-                if value != getattr(model, attr)}
+        return {
+            attr: getattr(model, attr)
+            for attr, value in self._get_mutable_fields().items() if value != getattr(model, attr)
+        }
 
     def _get_persistent_model(self):
         model = self.copy()

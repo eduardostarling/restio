@@ -1,3 +1,4 @@
 [flake8]
 ignore = E501,F811,W504
 disable = E0102
+max-line-length=120
