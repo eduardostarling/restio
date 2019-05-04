@@ -13,3 +13,4 @@ pytest.main([CURRENT_DIRECTORY])
 
 cov.stop()
 cov.html_report(directory=os.path.join(CURRENT_DIRECTORY, 'htmlcov'))
+cov.xml_report(outfile=os.path.join(CURRENT_DIRECTORY, 'coverage.xml'))
