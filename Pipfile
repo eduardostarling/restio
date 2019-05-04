@@ -9,6 +9,8 @@ mypy = "*"
 flake8 = "*"
 yapf = "*"
 rope = "*"
+pytest = "*"
+pytest-azurepipelines = "*"
 
 [packages]
 restio = {editable = true,path = "."}

@@ -1,6 +1,6 @@
 import os
 from coverage import Coverage
-from unittest import TestLoader, TextTestRunner
+import pytest
 
 CURRENT_DIRECTORY = os.path.dirname(__file__)
 
@@ -9,8 +9,7 @@ cov.exclude('\.\.\.')  # noqa
 cov.exclude('pass')
 cov.start()
 
-tests = TestLoader().discover(os.path.join(CURRENT_DIRECTORY, 'unit'), top_level_dir=CURRENT_DIRECTORY)
-TextTestRunner().run(tests)
+pytest.main([CURRENT_DIRECTORY])
 
 cov.stop()
 cov.html_report(directory=os.path.join(CURRENT_DIRECTORY, 'htmlcov'))
