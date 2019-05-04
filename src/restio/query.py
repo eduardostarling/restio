@@ -35,7 +35,7 @@ class BaseQuery:
         return await self.__function(transaction, *self.__args, **self.__kwargs)
 
 
-def Query(function=None):
+def query(function=None):
     params = inspect.signature(function).parameters
     keys = list(params.keys())
 

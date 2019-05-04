@@ -6,7 +6,7 @@ import asyncio
 
 from restio.model import BaseModel, PrimaryKey, ValueKey, mdataclass, pk
 from restio.state import ModelState
-from restio.query import Query
+from restio.query import query
 from restio.dao import BaseDAO
 from restio.transaction import Transaction, TransactionError, PersistencyStrategy
 from restio.graph import DependencyGraph, NavigationDirection
@@ -57,7 +57,7 @@ class ModelDAOException(ModelDAO):
         return ret
 
 
-@Query
+@query
 async def SimpleQuery(self, test_case: 'TestTransaction') -> List[ModelA]:
     global caller
 
@@ -71,7 +71,7 @@ async def SimpleQuery(self, test_case: 'TestTransaction') -> List[ModelA]:
     return [a, b, c]
 
 
-@Query
+@query
 async def EmptyQuery(self, test_case: 'TestTransaction') -> List[ModelA]:
     test_case.assertIsInstance(self, Transaction)
     return []

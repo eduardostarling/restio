@@ -1,15 +1,15 @@
 from typing import Tuple
 from .base import TestBase
 
-from restio.query import Query
+from restio.query import query
 
 
-@Query
+@query
 async def ArgsQuery(self, arg1: int, arg2: int = 2) -> Tuple[str, int]:
     return (self, arg2)
 
 
-@Query
+@query
 async def ArgsQuery2(self, arg1: int, arg2: int = 2) -> Tuple[str, int]:
     return (self, arg2)
 
@@ -46,14 +46,14 @@ class TestQueryCache(TestBase):
 
     def test_invalid_query(self):
         with self.assertRaises(AttributeError):
-            @Query
+            @query
             async def QueryNoSelf(arg1, arg2):
                 pass
 
             QueryNoSelf(1, 2)
 
         with self.assertRaises(AttributeError):
-            @Query
+            @query
             async def QueryWrongSelf(arg1, arg2, self):
                 pass
 

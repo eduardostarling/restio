@@ -8,12 +8,13 @@ coverage = "*"
 mypy = "*"
 flake8 = "*"
 yapf = "*"
+rope = "*"
 
 [packages]
 restio = {editable = true,path = "."}
 
 [requires]
-python_version = "3.7"
+python_version = "3.7.3"
 
 [scripts]
 test = "python src/tests/test.py"

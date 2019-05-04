@@ -2,7 +2,7 @@ from typing import List
 from .base import TestBase
 
 from restio.model import BaseModel, PrimaryKey, pk, mdataclass
-from restio.query import Query
+from restio.query import query
 from restio.cache import ModelCache, QueryCache
 
 
@@ -11,14 +11,14 @@ class Model(BaseModel):
     id: PrimaryKey[int] = pk(int)
 
 
-@Query
+@query
 async def SimpleQuery(self) -> List[Model]:
     m1 = Model(id=PrimaryKey(int, 1))
     m2 = Model(id=PrimaryKey(int, 2))
     return [m1, m2]
 
 
-@Query
+@query
 async def ArgsQuery(self, arg1: int, arg2: int = 2) -> List[BaseModel]:
     m1 = Model(id=PrimaryKey(int, arg1))
     m2 = Model(id=PrimaryKey(int, arg2))
