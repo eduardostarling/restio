@@ -9,13 +9,6 @@ from restio.model import BaseModel, mdataclass
 from restio.graph import Node, Tree, DependencyGraph, NavigationDirection
 
 
-def async_test(coro):
-    def wrapper(*args, **kwargs):
-        loop = asyncio.new_event_loop()
-        return loop.run_until_complete(coro(*args, **kwargs))
-    return wrapper
-
-
 @mdataclass
 class ModelMock(BaseModel):
     name: str = ""
@@ -230,11 +223,11 @@ class TestTree(TestBase):
                     for relative in relatives:
                         self.assertGreater(processed_nodes.index(relative), index)
 
-    @async_test
+    @TestBase.async_test
     async def test_process(self):
         await self.validate_process(self.get_trees)
 
-    @async_test
+    @TestBase.async_test
     async def test_process_complex(self):
         await self.validate_process(self.get_trees_complex)
 
