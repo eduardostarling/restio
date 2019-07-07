@@ -93,7 +93,7 @@ class TestTransaction(TestBase):
         return (a, b, c)
 
     def get_models_complex(self):
-        """
+        r"""
         F(66)   E(55)   C(33)
            \     /        |
             D(44)       B(22)
@@ -485,7 +485,8 @@ class TestTransaction(TestBase):
         c._state = ModelState.DELETED
         x._check_deleted_models()
 
-    def test_commit(self):
+    @TestBase.async_test
+    async def test_commit(self):
         for i in range(30):
             models = set(self.get_models_complex())
 
@@ -500,7 +501,7 @@ class TestTransaction(TestBase):
             for model in models:
                 x.register_model(model)
 
-            x.commit()
+            await x.commit()
 
             models_in_cache = x._model_cache._cache.values()
 
@@ -511,7 +512,8 @@ class TestTransaction(TestBase):
             models_removed = set(filter(lambda m: m._state == ModelState.DELETED, models))
             self.assertEqual(len(set(models_in_cache).intersection(models_removed)), 0)
 
-    def test_commit_exception(self):
+    @TestBase.async_test
+    async def test_commit_exception(self):
         a, b, c, d, e, f = models = list(self.get_models_complex())
 
         x = Transaction(strategy=PersistencyStrategy.INTERRUPT_ON_ERROR)
@@ -528,7 +530,7 @@ class TestTransaction(TestBase):
             x.register_model(model)
 
         with self.assertRaises(TransactionError) as error:
-            x.commit()
+            await x.commit()
 
         ex = error.exception
 
@@ -541,7 +543,8 @@ class TestTransaction(TestBase):
         self.assertEqual(len(ex.errors), 1)
         self.assertEqual(ex.errors[0].model, a)
 
-    def _check_exception_strategies(self, models, strategy, expected):
+    @TestBase.async_test
+    async def _check_exception_strategies(self, models, strategy, expected):
         x = Transaction(strategy=strategy)
         x.register_dao(ModelDAOException(ModelA))
 
@@ -549,7 +552,7 @@ class TestTransaction(TestBase):
             x.register_model(model)
 
         with self.assertRaises(TransactionError) as error:
-            x.commit()
+            await x.commit()
 
         ex = error.exception
         expected_processed, maybe_processed, expected_errors, expected_not_processed = expected

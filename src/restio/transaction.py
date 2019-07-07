@@ -229,7 +229,7 @@ class Transaction:
                         "other models cannot be deleted."
                     )
 
-    def commit(self):
+    async def commit(self):
         cached_values = self._model_cache.get_all_models()
 
         models_to_add = self._get_models_to_add(cached_values)
@@ -262,9 +262,8 @@ class Transaction:
             NavigationDirection.LEAFS_TO_ROOTS, NavigationDirection.LEAFS_TO_ROOTS, NavigationDirection.ROOTS_TO_LEAFS
         ]
 
-        loop = asyncio.get_event_loop()
         try:
-            loop.run_until_complete(self._process_all_graphs(graphs, directions))
+            await self._process_all_graphs(graphs, directions)
         except TransactionError:
             raise
         finally:
