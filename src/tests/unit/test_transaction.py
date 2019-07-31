@@ -476,7 +476,6 @@ class TestTransaction:
         repeat=6)
 
     @pytest.mark.parametrize('states', commit_iterations)
-    @pytest.mark.slow
     @pytest.mark.asyncio
     async def test_commit(self, t, models_complex, states):
         models = set(models_complex)

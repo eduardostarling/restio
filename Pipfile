@@ -12,6 +12,8 @@ rope = "*"
 pytest = "*"
 pytest-azurepipelines = "*"
 pytest-asyncio = "*"
+pytest-xdist = "*"
+pytest-cov = "*"
 
 [packages]
 restio = {editable = true,path = "."}
