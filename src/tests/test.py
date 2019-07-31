@@ -1,16 +1,16 @@
 import os
-from coverage import Coverage
+from pathlib import Path
+
 import pytest
 
-CURRENT_DIRECTORY = os.path.dirname(__file__)
+CURRENT_DIRECTORY = Path(os.path.dirname(__file__))
+COVERAGE_DIR = (CURRENT_DIRECTORY / '../restio/').resolve()
 
-cov = Coverage(source=[os.path.join(CURRENT_DIRECTORY, '../restio/')], data_suffix=False)
-cov.exclude('\.\.\.')  # noqa
-cov.exclude('pass')
-cov.start()
-
-pytest.main([CURRENT_DIRECTORY])
-
-cov.stop()
-cov.html_report(directory=os.path.join(CURRENT_DIRECTORY, 'htmlcov'))
-cov.xml_report(outfile=os.path.join(CURRENT_DIRECTORY, 'coverage.xml'))
+pytest.main([
+    str(CURRENT_DIRECTORY),
+    "--cov", str(COVERAGE_DIR),
+    "-n", "auto",
+    "--cov-report", "xml",
+    "--cov-report", "html",
+    "--cov-branch"
+])
