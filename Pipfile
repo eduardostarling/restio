@@ -22,4 +22,4 @@ restio = {editable = true,path = "."}
 python_version = "3.7.2"
 
 [scripts]
-test = "python src/tests/test.py"
+test = "python tests/test.py"
