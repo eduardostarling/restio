@@ -1,15 +1,20 @@
-from typing import List, Tuple, Optional
-from .base import TestBase
-from random import randint
-from uuid import uuid4
-import asyncio
+from __future__ import annotations
 
-from restio.model import BaseModel, PrimaryKey, ValueKey, mdataclass, pk
-from restio.state import ModelState
-from restio.query import query
+import asyncio
+import itertools
+from random import randint
+from typing import List, Optional, Tuple
+from uuid import uuid4
+
+import pytest
+
 from restio.dao import BaseDAO
-from restio.transaction import Transaction, TransactionError, PersistencyStrategy
 from restio.graph import DependencyGraph, NavigationDirection
+from restio.model import BaseModel, PrimaryKey, ValueKey, mdataclass, pk
+from restio.query import query
+from restio.state import ModelState
+from restio.transaction import (PersistencyStrategy, Transaction,
+                                TransactionError)
 
 caller = None
 
@@ -58,27 +63,31 @@ class ModelDAOException(ModelDAO):
 
 
 @query
-async def SimpleQuery(self, test_case: 'TestTransaction') -> List[ModelA]:
+async def SimpleQuery(self, query_arg: TestTransaction) -> List[ModelA]:
     global caller
 
     a = ModelA(key=PrimaryKey(int, 1), v=11)
     b = ModelA(key=PrimaryKey(int, 2), v=22, ref=a)
     c = ModelA(key=PrimaryKey(int, 3), v=33, ref=b)
 
-    test_case.assertIsInstance(self, Transaction)
-    test_case.assertEqual(caller, "BeforeCache")
+    assert isinstance(query_arg, TestTransaction)
+    assert isinstance(self, Transaction)
+    assert caller == "BeforeCache"
 
     return [a, b, c]
 
 
 @query
-async def EmptyQuery(self, test_case: 'TestTransaction') -> List[ModelA]:
-    test_case.assertIsInstance(self, Transaction)
+async def EmptyQuery(self, query_arg: TestTransaction) -> List[ModelA]:
+    assert isinstance(query_arg, TestTransaction)
+    assert isinstance(self, Transaction)
+
     return []
 
 
-class TestTransaction(TestBase):
-    def get_models(self):
+class TestTransaction:
+    @pytest.fixture
+    def models(self):
         """
         C(33)
           |
@@ -92,7 +101,10 @@ class TestTransaction(TestBase):
 
         return (a, b, c)
 
-    def get_models_complex(self):
+    new_models = models
+
+    @pytest.fixture
+    def models_complex(self, models):
         r"""
         F(66)   E(55)   C(33)
            \     /        |
@@ -101,14 +113,15 @@ class TestTransaction(TestBase):
                         A(11)
         """
 
-        a, b, c = self.get_models()
+        a, b, c = models
         d = ModelA(key=PrimaryKey(int, 4), v=44)
         e = ModelA(key=PrimaryKey(int, 5), v=55, ref=d)
         f = ModelA(key=PrimaryKey(int, 6), v=66, ref=d)
 
         return (a, b, c, d, e, f)
 
-    def get_models_strategy(self):
+    @pytest.fixture
+    def models_strategy(self):
         """
         A   C   E   G   I
         |   |   |   |   |
@@ -140,133 +153,124 @@ class TestTransaction(TestBase):
 
         return models
 
-    def test_init(self):
-        x = Transaction()
+    @pytest.fixture
+    def t(self):
+        return Transaction()
 
-        self.assertDictEqual(x._model_cache._cache, {})
-        self.assertDictEqual(x._query_cache._cache, {})
+    def test_init(self, t):
+        assert t._model_cache._cache == {}
+        assert t._query_cache._cache == {}
 
-    @TestBase.async_test
-    async def test_register_model(self):
+    @pytest.mark.asyncio
+    async def test_register_model(self, t):
         a = ModelA(key=PrimaryKey(int, 1), v=11)
         b = ModelA(key=PrimaryKey(int, 2), v=22)
 
-        x = Transaction()
-        x.register_model(a)
-        x.register_model(b)
-        x.register_model(None)
+        t.register_model(a)
+        t.register_model(b)
+        t.register_model(None)
 
-        self.assertEqual(len(x._model_cache._cache.values()), 2)
-        self.assertEqual(await x.get(ModelA, 1), a)
-        self.assertEqual(await x.get(ModelA, 2), b)
+        assert len(t._model_cache._cache.values()) == 2
+        assert await t.get(ModelA, 1) == a
+        assert await t.get(ModelA, 2) == b
 
-        return a, b, x
-
-    @TestBase.async_test
-    async def test_force_register_model(self):
+    @pytest.mark.asyncio
+    async def test_force_register_model(self, t):
         old_a = ModelA(key=PrimaryKey(int, 1), v=11)
         old_b = ModelA(key=PrimaryKey(int, 2), v=22)
         a = ModelA(key=PrimaryKey(int, 1), v=33)
         b = ModelA(key=PrimaryKey(int, 2), v=44)
 
-        x = Transaction()
-        x.register_model(old_a)
-        x.register_model(old_b)
-        x.register_model(a)
-        x.register_model(b)
+        t.register_model(old_a)
+        t.register_model(old_b)
+        t.register_model(a)
+        t.register_model(b)
 
-        self.assertEqual(await x.get(ModelA, 1), old_a)
-        self.assertEqual(await x.get(ModelA, 2), old_b)
-        self.assertNotEqual(await x.get(ModelA, 1), a)
-        self.assertNotEqual(await x.get(ModelA, 2), b)
+        assert await t.get(ModelA, 1) == old_a
+        assert await t.get(ModelA, 2) == old_b
+        assert await t.get(ModelA, 1) != a
+        assert await t.get(ModelA, 2) != b
 
-        x.register_model(a, True)
-        x.register_model(b, True)
+        t.register_model(a, True)
+        t.register_model(b, True)
 
-        self.assertNotEqual(await x.get(ModelA, 1), old_a)
-        self.assertNotEqual(await x.get(ModelA, 2), old_b)
-        self.assertEqual(await x.get(ModelA, 1), a)
-        self.assertEqual(await x.get(ModelA, 2), b)
+        assert await t.get(ModelA, 1) != old_a
+        assert await t.get(ModelA, 2) != old_b
+        assert await t.get(ModelA, 1) == a
+        assert await t.get(ModelA, 2) == b
 
-    @TestBase.async_test
-    async def test_register_model_and_children(self):
-        a, b, c = self.get_models()
+    @pytest.mark.asyncio
+    async def test_register_model_and_children(self, t, models):
+        a, b, c = models
+        t.register_model(c)
 
-        x = Transaction()
-        x.register_model(c)
-
-        self.assertEqual(await x.get(ModelA, 1), a)
-        self.assertEqual(await x.get(ModelA, 2), b)
-        self.assertEqual(await x.get(ModelA, 3), c)
+        assert await t.get(ModelA, 1) == a
+        assert await t.get(ModelA, 2) == b
+        assert await t.get(ModelA, 3) == c
 
         y = Transaction()
-        with self.assertRaises(RuntimeError):
+        with pytest.raises(RuntimeError):
             y.register_model(c, register_children=False)
 
-        return a, b, c, x
+    @pytest.mark.asyncio
+    async def test_force_register_model_and_children(self, t, models, new_models):
+        old_a, old_b, old_c = models
+        a, b, c = new_models
 
-    @TestBase.async_test
-    async def test_force_register_model_and_children(self):
-        old_a, old_b, old_c = self.get_models()
-        a, b, c = self.get_models()
+        t.register_model(old_c)
+        t.register_model(c)
 
-        x = Transaction()
-        x.register_model(old_c)
-        x.register_model(c)
+        assert await t.get(ModelA, 1) == old_a
+        assert await t.get(ModelA, 2) == old_b
+        assert await t.get(ModelA, 3) == old_c
+        assert await t.get(ModelA, 1) != a
+        assert await t.get(ModelA, 2) != b
+        assert await t.get(ModelA, 3) != c
 
-        self.assertEqual(await x.get(ModelA, 1), old_a)
-        self.assertEqual(await x.get(ModelA, 2), old_b)
-        self.assertEqual(await x.get(ModelA, 3), old_c)
-        self.assertNotEqual(await x.get(ModelA, 1), a)
-        self.assertNotEqual(await x.get(ModelA, 2), b)
-        self.assertNotEqual(await x.get(ModelA, 3), c)
+        t.register_model(c, True)
 
-        x.register_model(c, True)
+        assert await t.get(ModelA, 1) != old_a
+        assert await t.get(ModelA, 2) != old_b
+        assert await t.get(ModelA, 3) != old_c
+        assert await t.get(ModelA, 1) == a
+        assert await t.get(ModelA, 2) == b
+        assert await t.get(ModelA, 3) == c
 
-        self.assertNotEqual(await x.get(ModelA, 1), old_a)
-        self.assertNotEqual(await x.get(ModelA, 2), old_b)
-        self.assertNotEqual(await x.get(ModelA, 3), old_c)
-        self.assertEqual(await x.get(ModelA, 1), a)
-        self.assertEqual(await x.get(ModelA, 2), b)
-        self.assertEqual(await x.get(ModelA, 3), c)
+    @pytest.mark.asyncio
+    async def test_get_cached(self, t, models):
+        a, b, c = models
 
-    @TestBase.async_test
-    async def test_get_cached(self):
-        a, b, c = self.get_models()
+        t._model_cache.register(a)
+        t._model_cache.register(b)
+        t._model_cache.register(c)
 
-        x = Transaction()
-        x._model_cache.register(a)
-        x._model_cache.register(b)
-        x._model_cache.register(c)
+        assert await t.get(ModelA, 1) == a
+        assert await t.get(ModelA, 2) == b
+        assert await t.get(ModelA, 3) == c
 
-        self.assertEqual(await x.get(ModelA, 1), a)
-        self.assertEqual(await x.get(ModelA, 2), b)
-        self.assertEqual(await x.get(ModelA, 3), c)
-
-    @TestBase.async_test
-    async def test_get_cached_reset(self):
-        a, _, _ = self.get_models()
+    @pytest.mark.asyncio
+    async def test_get_cached_reset(self, t, models):
+        a, _, _ = models
         query = EmptyQuery(self)
 
-        x = Transaction()
-        x.register_model(a)
-        x.register_query(query, await query(x))
+        t.register_model(a)
+        t.register_query(query, await query(t))
 
-        self.assertEqual(await x.get(ModelA, 1), a)
-        self.assertEqual(await x.query(query), [])
+        assert await t.get(ModelA, 1) == a
+        assert await t.query(query) == []
 
-        x.reset()
-        self.assertDictEqual(x._model_cache._cache, {})
-        self.assertDictEqual(x._query_cache._cache, {})
+        t.reset()
+        assert t._model_cache._cache == {}
+        assert t._query_cache._cache == {}
 
         # after reset, the transaction must try to call
         # the DAO since "a" has been cleared
-        with self.assertRaises(RuntimeError):
-            await x.get(ModelA, 1)
+        with pytest.raises(RuntimeError):
+            await t.get(ModelA, 1)
 
-    @TestBase.async_test
-    async def test_get_new(self):
-        a, b, c = self.get_models()
+    @pytest.mark.asyncio
+    async def test_get_new(self, t, models):
+        a, b, c = models
 
         class ModelADAO(BaseDAO):
             _model_type = ModelA
@@ -283,241 +287,224 @@ class TestTransaction(TestBase):
 
                 return None
 
-        x = Transaction()
-        x.register_dao(ModelADAO())
+        t.register_dao(ModelADAO())
 
-        self.assertEqual(await x.get(ModelA, 1), a)
-        self.assertEqual(await x.get(ModelA, [2]), b)
-        self.assertEqual(await x.get(ModelA, 3), c)
-        self.assertEqual(await x.get(ModelA, 4), None)
+        assert await t.get(ModelA, 1) == a
+        assert await t.get(ModelA, [2]) == b
+        assert await t.get(ModelA, 3) == c
+        assert await t.get(ModelA, 4) is None
 
-        self.assertEqual(a._state, ModelState.CLEAN)
-        self.assertEqual(b._state, ModelState.CLEAN)
-        self.assertEqual(c._state, ModelState.CLEAN)
+        assert a._state == ModelState.CLEAN
+        assert b._state == ModelState.CLEAN
+        assert c._state == ModelState.CLEAN
 
-    @TestBase.async_test
-    async def test_get_invalid_dao(self):
-        x = Transaction()
-        with self.assertRaises(RuntimeError):
-            await x.get(ModelA, 1)
+    @pytest.mark.asyncio
+    async def test_get_invalid_dao(self, t):
+        with pytest.raises(RuntimeError):
+            await t.get(ModelA, 1)
 
-    @TestBase.async_test
-    async def test_get_not_implemented(self):
-        x = Transaction()
-        x.register_dao(BaseDAO(BaseModel))
-        with self.assertRaises(RuntimeError):
-            await x.get(BaseModel, 1)
+    @pytest.mark.asyncio
+    async def test_get_not_implemented(self, t):
+        t.register_dao(BaseDAO(BaseModel))
+        with pytest.raises(RuntimeError):
+            await t.get(BaseModel, 1)
 
-    @TestBase.async_test
-    async def test_query(self):
+    @pytest.mark.asyncio
+    async def test_query(self, t):
         global caller
 
-        x = Transaction()
         q = SimpleQuery(self)
 
         # performs query
         caller = "BeforeCache"
-        a, b, c = tuple(await x.query(q))
+        a, b, c = tuple(await t.query(q))
 
-        self.assertEqual(await x.get(ModelA, 1), a)
-        self.assertEqual(await x.get(ModelA, 2), b)
-        self.assertEqual(await x.get(ModelA, 3), c)
+        assert await t.get(ModelA, 1) == a
+        assert await t.get(ModelA, 2) == b
+        assert await t.get(ModelA, 3) == c
 
         # retrieves from cache
         caller = "AfterCache"
-        a, b, c = tuple(await x.query(q))
+        a, b, c = tuple(await t.query(q))
 
-        self.assertEqual(await x.get(ModelA, 1), a)
-        self.assertEqual(await x.get(ModelA, 2), b)
-        self.assertEqual(await x.get(ModelA, 3), c)
+        assert await t.get(ModelA, 1) == a
+        assert await t.get(ModelA, 2) == b
+        assert await t.get(ModelA, 3) == c
 
-    @TestBase.async_test
-    async def test_empty_query(self):
-        x = Transaction()
+    @pytest.mark.asyncio
+    async def test_empty_query(self, t):
         q = EmptyQuery(self)
+        assert await t.query(q) == []
 
-        self.assertEqual(await x.query(q), [])
+    def test_assert_cache_internal_id(self, t):
+        with pytest.raises(RuntimeError):
+            t._assert_cache_internal_id(ModelA())
 
-    def test_assert_cache_internal_id(self):
-        x = Transaction()
-        with self.assertRaises(RuntimeError):
-            x._assert_cache_internal_id(ModelA())
-
-    @TestBase.async_test
-    async def test_add(self):
-        x = Transaction()
-        a, _, _ = self.get_models()
+    @pytest.mark.asyncio
+    async def test_add(self, t, models):
+        a, _, _ = models
         a_copy = a.copy()
         a_copy._internal_id = uuid4()
 
-        self.assertTrue(x.add(a))
+        assert t.add(a)
 
-        with self.assertRaises(RuntimeError):
-            x.add(a)
+        with pytest.raises(RuntimeError):
+            t.add(a)
 
-        with self.assertRaises(RuntimeError):
-            x.add(a_copy)
+        with pytest.raises(RuntimeError):
+            t.add(a_copy)
 
-        cached_a = await x.get(ModelA, 1)
+        cached_a = await t.get(ModelA, 1)
 
-        self.assertEqual(cached_a, a)
-        self.assertEqual(cached_a._state, ModelState.NEW)
+        assert cached_a == a
+        assert cached_a._state == ModelState.NEW
 
-    @TestBase.async_test
-    async def test_update(self):
-        x = Transaction()
-        a, _, _ = self.get_models()
+    @pytest.mark.asyncio
+    async def test_update(self, t, models):
+        a, _, _ = models
         old_a_value = a.v
 
-        x.register_model(a)
-        cached_a = await x.get(ModelA, 1)
+        t.register_model(a)
+        cached_a = await t.get(ModelA, 1)
 
-        self.assertEqual(cached_a, a)
-        self.assertEqual(cached_a._state, ModelState.CLEAN)
+        assert cached_a == a
+        assert cached_a._state == ModelState.CLEAN
 
         a.v = 100
-        x.update(a)
+        t.update(a)
 
-        cached_a = await x.get(ModelA, 1)
+        cached_a = await t.get(ModelA, 1)
 
-        self.assertEqual(cached_a._state, ModelState.DIRTY)
-        self.assertEqual(cached_a.v, 100)
-        self.assertDictEqual(cached_a._persistent_values, {'v': old_a_value})
+        assert cached_a._state == ModelState.DIRTY
+        assert cached_a.v == 100
+        assert cached_a._persistent_values == {'v': old_a_value}
 
-        return x, a, old_a_value
-
-    @TestBase.async_test
-    async def test_update_twice(self):
-        x = Transaction()
-        a, _, _ = self.get_models()
+    @pytest.mark.asyncio
+    async def test_update_twice(self, t, models):
+        a, _, _ = models
         old_a_value = a.v
         old_a_string = a.s
 
-        x.register_model(a)
+        t.register_model(a)
 
         a.v = 100
-        x.update(a)
+        t.update(a)
 
         a.v = old_a_value
         a.s = "string"
-        x.update(a)
+        t.update(a)
 
-        cached_a = await x.get(ModelA, 1)
+        cached_a = await t.get(ModelA, 1)
 
-        self.assertEqual(cached_a._state, ModelState.DIRTY)
-        self.assertEqual(cached_a.v, old_a_value)
-        self.assertEqual(cached_a.s, "string")
-        self.assertDictEqual(cached_a._persistent_values, {'s': old_a_string})
+        assert cached_a._state == ModelState.DIRTY
+        assert cached_a.v == old_a_value
+        assert cached_a.s == "string"
+        assert cached_a._persistent_values == {'s': old_a_string}
 
-        return x, a, old_a_value, old_a_string
-
-    @TestBase.async_test
-    async def test_update_to_persistent(self):
-        x = Transaction()
-        a, _, _ = self.get_models()
+    @pytest.mark.asyncio
+    async def test_update_to_persistent(self, t, models):
+        a, _, _ = models
         old_a_value = a.v
         old_a_string = a.s
 
-        x.register_model(a)
+        t.register_model(a)
 
         a.v = 100
         a.s = "string"
-        x.update(a)
+        t.update(a)
 
         a.v = old_a_value
         a.s = old_a_string
 
-        x.update(a)
+        t.update(a)
 
-        cached_a = await x.get(ModelA, 1)
+        cached_a = await t.get(ModelA, 1)
 
-        self.assertEqual(cached_a._state, ModelState.CLEAN)
-        self.assertEqual(cached_a.v, old_a_value)
-        self.assertEqual(cached_a.s, old_a_string)
-        self.assertDictEqual(cached_a._persistent_values, {})
+        assert cached_a._state == ModelState.CLEAN
+        assert cached_a.v == old_a_value
+        assert cached_a.s == old_a_string
+        assert cached_a._persistent_values == {}
 
-    @TestBase.async_test
-    async def test_update_new(self):
-        x = Transaction()
-        a, _, _ = self.get_models()
+    @pytest.mark.asyncio
+    async def test_update_new(self, t, models):
+        a, _, _ = models
 
-        x.add(a)
-        cached_a = await x.get(ModelA, 1)
+        t.add(a)
+        cached_a = await t.get(ModelA, 1)
 
-        self.assertEqual(cached_a, a)
-        self.assertEqual(cached_a._state, ModelState.NEW)
+        assert cached_a == a
+        assert cached_a._state == ModelState.NEW
 
         a.v = 100
-        x.update(a)
+        t.update(a)
 
-        cached_a = await x.get(ModelA, 1)
+        cached_a = await t.get(ModelA, 1)
 
-        self.assertEqual(cached_a._state, ModelState.NEW)
-        self.assertEqual(cached_a.v, 100)
-        self.assertDictEqual(cached_a._persistent_values, {})
+        assert cached_a._state == ModelState.NEW
+        assert cached_a.v == 100
+        assert cached_a._persistent_values == {}
 
-    @TestBase.async_test
-    async def test_remove(self):
-        x = Transaction()
-        a, _, _ = self.get_models()
+    @pytest.mark.asyncio
+    async def test_remove(self, t, models):
+        a, _, _ = models
 
-        x.register_model(a)
-        cached_a = await x.get(ModelA, 1)
+        t.register_model(a)
+        cached_a = await t.get(ModelA, 1)
 
-        self.assertEqual(cached_a, a)
-        self.assertEqual(cached_a._state, ModelState.CLEAN)
+        assert cached_a == a
+        assert cached_a._state == ModelState.CLEAN
 
-        x.remove(a)
+        t.remove(a)
 
-        cached_a = await x.get(ModelA, 1)
+        cached_a = await t.get(ModelA, 1)
 
-        self.assertEqual(cached_a._state, ModelState.DELETED)
+        assert cached_a._state == ModelState.DELETED
 
-    def test_check_deleted_models(self):
-        a, b, c = models = self.get_models()
+    def test_check_deleted_models(self, t, models):
+        a, b, c = models
         a._state = ModelState.DELETED
         b._state = ModelState.DELETED
 
-        x = Transaction()
-        with self.assertRaises(RuntimeError):
-            x._check_deleted_models(models)
+        with pytest.raises(RuntimeError):
+            t._check_deleted_models(models)
 
         c._state = ModelState.DELETED
-        x._check_deleted_models()
+        t._check_deleted_models()
 
-    @TestBase.async_test
-    async def test_commit(self):
-        for i in range(30):
-            models = set(self.get_models_complex())
+    commit_iterations = itertools.product(
+        [ModelState.NEW, ModelState.DIRTY, ModelState.DELETED],
+        repeat=6)
 
-            x = Transaction()
-            x.register_dao(ModelDAO(ModelA))
+    @pytest.mark.parametrize('states', commit_iterations)
+    @pytest.mark.slow
+    @pytest.mark.asyncio
+    async def test_commit(self, t, models_complex, states):
+        models = set(models_complex)
+        t.register_dao(ModelDAO(ModelA))
 
-            states = [ModelState.NEW, ModelState.DIRTY, ModelState.DELETED]
+        for index, model in enumerate(models):
+            model._state = states[index]
 
-            for model in models:
-                model._state = states[randint(0, len(states) - 1)]
+        for model in models:
+            t.register_model(model)
 
-            for model in models:
-                x.register_model(model)
+        await t.commit()
 
-            await x.commit()
+        models_in_cache = t._model_cache._cache.values()
 
-            models_in_cache = x._model_cache._cache.values()
+        for model in models_in_cache:
+            assert model._state == ModelState.CLEAN
+            assert model._persistent_values == {}
 
-            for model in models_in_cache:
-                self.assertEqual(model._state, ModelState.CLEAN)
-                self.assertDictEqual(model._persistent_values, {})
+        models_removed = set(filter(lambda m: m._state == ModelState.DELETED, models))
+        assert len(set(models_in_cache).intersection(models_removed)) == 0
 
-            models_removed = set(filter(lambda m: m._state == ModelState.DELETED, models))
-            self.assertEqual(len(set(models_in_cache).intersection(models_removed)), 0)
+    @pytest.mark.asyncio
+    async def test_commit_exception(self, models_complex):
+        a, b, c, d, e, f = models = list(models_complex)
 
-    @TestBase.async_test
-    async def test_commit_exception(self):
-        a, b, c, d, e, f = models = list(self.get_models_complex())
-
-        x = Transaction(strategy=PersistencyStrategy.INTERRUPT_ON_ERROR)
-        x.register_dao(ModelDAOException(ModelA))
+        t = Transaction(strategy=PersistencyStrategy.INTERRUPT_ON_ERROR)
+        t.register_dao(ModelDAOException(ModelA))
 
         f._state = ModelState.NEW
         e._state = ModelState.NEW
@@ -527,38 +514,38 @@ class TestTransaction(TestBase):
         a.ex = True
 
         for model in models:
-            x.register_model(model)
+            t.register_model(model)
 
-        with self.assertRaises(TransactionError) as error:
-            await x.commit()
+        with pytest.raises(TransactionError) as error:
+            await t.commit()
 
-        ex = error.exception
+        ex = error.value
 
-        a_cache, b_cache = [x._model_cache.get_by_internal_id(ModelA, y._internal_id) for y in [a, b]]
-        self.assertIsNone(b_cache)
-        self.assertIsNotNone(a_cache)
-        self.assertEqual(a_cache._state, ModelState.DELETED)
+        a_cache, b_cache = [t._model_cache.get_by_internal_id(ModelA, y._internal_id) for y in [a, b]]
+        assert b_cache is None
+        assert a_cache is not None
+        assert a_cache._state == ModelState.DELETED
 
-        self.assertSetEqual(set(ex.models), set([f, e, d, b]))
-        self.assertEqual(len(ex.errors), 1)
-        self.assertEqual(ex.errors[0].model, a)
+        assert set(ex.models), set([f, e, d == b])
+        assert len(ex.errors) == 1
+        assert ex.errors[0].model == a
 
-    @TestBase.async_test
+    @pytest.mark.asyncio
     async def _check_exception_strategies(self, models, strategy, expected):
-        x = Transaction(strategy=strategy)
-        x.register_dao(ModelDAOException(ModelA))
+        t = Transaction(strategy=strategy)
+        t.register_dao(ModelDAOException(ModelA))
 
         for model in models:
-            x.register_model(model)
+            t.register_model(model)
 
-        with self.assertRaises(TransactionError) as error:
-            await x.commit()
+        with pytest.raises(TransactionError) as error:
+            await t.commit()
 
-        ex = error.exception
+        ex = error.value
         expected_processed, maybe_processed, expected_errors, expected_not_processed = expected
         processed_models = set(ex.models)
         error_models = set([e.model for e in ex.errors])
-        pending_models = x.get_transaction_models()
+        pending_models = t.get_transaction_models()
 
         # A model that may have been processed is either processed or
         # pending. Intersecting both processed and pending lists should
@@ -567,13 +554,14 @@ class TestTransaction(TestBase):
             maybe_processed.intersection(pending_models)
         )
 
-        self.assertEqual(expected_processed.intersection(processed_models), expected_processed)
-        self.assertEqual(maybe_processed, expected_processed_or_pending)
-        self.assertSetEqual(expected_errors, error_models)
-        self.assertSetEqual(expected_not_processed, pending_models)
+        assert expected_processed.intersection(processed_models) == expected_processed
+        assert maybe_processed == expected_processed_or_pending
+        assert expected_errors == error_models
+        assert expected_not_processed == pending_models
 
-    def test_commit_exception_interrupt_on_error(self):
-        a, b, c, d, e, f, g, h, i, j = models = self.get_models_strategy()
+    @pytest.mark.asyncio
+    async def test_commit_exception_interrupt_on_error(self, models_strategy):
+        a, b, c, d, e, f, g, h, i, j = models = models_strategy
 
         processed_when_canceled = set([b, e, g, h])
         maybe_processed_when_canceled = set([a, e])
@@ -582,10 +570,11 @@ class TestTransaction(TestBase):
         expected_canceled = (processed_when_canceled, maybe_processed_when_canceled,
                              errors_when_canceled, not_processed_when_canceled)
 
-        self._check_exception_strategies(models, PersistencyStrategy.INTERRUPT_ON_ERROR, expected_canceled)
+        await self._check_exception_strategies(models, PersistencyStrategy.INTERRUPT_ON_ERROR, expected_canceled)
 
-    def test_commit_exception_continue_on_error(self):
-        a, b, c, d, e, f, g, h, i, j = models = self.get_models_strategy()
+    @pytest.mark.asyncio
+    async def test_commit_exception_continue_on_error(self, models_strategy):
+        a, b, c, d, e, f, g, h, i, j = models = models_strategy
 
         processed_when_ignored = set(models).difference(set([d]))
         maybe_processed_when_ignored = set()
@@ -594,31 +583,27 @@ class TestTransaction(TestBase):
         expected_ignored = (processed_when_ignored, maybe_processed_when_ignored,
                             errors_when_ignored, not_processed_when_ignored)
 
-        self._check_exception_strategies(models, PersistencyStrategy.CONTINUE_ON_ERROR, expected_ignored)
+        await self._check_exception_strategies(models, PersistencyStrategy.CONTINUE_ON_ERROR, expected_ignored)
 
-    @TestBase.async_test
-    async def test_process_all_trees(self):
-        models = set(self.get_models_complex())
-
-        x = Transaction()
-        x.register_dao(ModelDAO(ModelA))
+    @pytest.mark.asyncio
+    async def test_process_all_trees(self, t, models_complex):
+        models = set(models_complex)
+        t.register_dao(ModelDAO(ModelA))
 
         for model in models:
             model._state = ModelState.NEW
 
         y = DependencyGraph.generate_from_objects(models)
 
-        processed_models = await x._process_all_trees(y, NavigationDirection.LEAFS_TO_ROOTS)
+        processed_models = await t._process_all_trees(y, NavigationDirection.LEAFS_TO_ROOTS)
         models = models.difference(set(processed_models))
 
-        self.assertEqual(len(models), 0)
+        assert len(models) == 0
 
-    @TestBase.async_test
-    async def test_process_tree(self):
-        a, b, c = self.get_models()
-
-        x = Transaction()
-        x.register_dao(ModelDAO(ModelA))
+    @pytest.mark.asyncio
+    async def test_process_tree(self, t, models):
+        a, b, c = models
+        t.register_dao(ModelDAO(ModelA))
 
         models = list([a, b, c])
         for model in models:
@@ -626,16 +611,14 @@ class TestTransaction(TestBase):
 
         y = DependencyGraph.generate_from_objects(models)
 
-        processed_models = list(reversed(await x._process_tree(y.trees[0], NavigationDirection.LEAFS_TO_ROOTS)))
+        processed_models = list(reversed(await t._process_tree(y.trees[0], NavigationDirection.LEAFS_TO_ROOTS)))
 
-        self.assertListEqual(models, processed_models)
+        assert models == processed_models
 
-    @TestBase.async_test
-    async def test_get_models_callables(self):
-        a, b, c = self.get_models()
-
-        x = Transaction()
-        x.register_dao(ModelDAO(ModelA))
+    @pytest.mark.asyncio
+    async def test_get_models_callables(self, t, models):
+        a, b, c = models
+        t.register_dao(ModelDAO(ModelA))
 
         models = set([a, b, c])
         y = DependencyGraph.generate_from_objects(models)
@@ -645,52 +628,51 @@ class TestTransaction(TestBase):
             for model in models:
                 model._state = state
 
-            for node, coroutine in x._get_nodes_callables(tree.get_nodes()).items():
+            for node, coroutine in t._get_nodes_callables(tree.get_nodes()).items():
                 node_return, model_return = await coroutine()
-                self.assertEqual(node.node_object, model_return)
-                self.assertEqual(node, node_return)
+                assert node.node_object == model_return
+                assert node == node_return
 
-    @TestBase.async_test
-    async def test_rollback(self):
-        a, b, c, d, e, f = models = list(self.get_models_complex())
-        x = Transaction()
+    @pytest.mark.asyncio
+    async def test_rollback(self, t, models_complex):
+        a, b, c, d, e, f = models = list(models_complex)
 
-        x.register_model(a)
-        x.register_model(d)
-        x.register_model(f)
-        x.add(b)
-        x.add(c)
-        x.add(e)
-        x.remove(f)
+        t.register_model(a)
+        t.register_model(d)
+        t.register_model(f)
+        t.add(b)
+        t.add(c)
+        t.add(e)
+        t.remove(f)
 
         d.v = 444
-        x.update(d)
+        t.update(d)
 
         a_cache, b_cache, c_cache, d_cache, e_cache, f_cache = \
-            [await x.get(m.__class__, m.get_keys()) for m in models]
+            [await t.get(m.__class__, m.get_keys()) for m in models]
 
-        self.assertEqual(a_cache._state, ModelState.CLEAN)
-        self.assertEqual(b_cache._state, ModelState.NEW)
-        self.assertEqual(c_cache._state, ModelState.NEW)
-        self.assertEqual(d_cache._state, ModelState.DIRTY)
-        self.assertEqual(e_cache._state, ModelState.NEW)
-        self.assertEqual(f_cache._state, ModelState.DELETED)
+        assert a_cache._state == ModelState.CLEAN
+        assert b_cache._state == ModelState.NEW
+        assert c_cache._state == ModelState.NEW
+        assert d_cache._state == ModelState.DIRTY
+        assert e_cache._state == ModelState.NEW
+        assert f_cache._state == ModelState.DELETED
 
-        self.assertEqual(d_cache, d)
-        self.assertEqual(d_cache.v, 444)
+        assert d_cache == d
+        assert d_cache.v == 444
 
-        x.rollback()
+        t.rollback()
 
-        a_cache = await x.get(a.__class__, a.get_keys())
-        d_cache = await x.get(d.__class__, d.get_keys())
+        a_cache = await t.get(a.__class__, a.get_keys())
+        d_cache = await t.get(d.__class__, d.get_keys())
 
         for m in [b, c, e, f]:
-            with self.assertRaises(RuntimeError):
-                await x.get(m.__class__, m.get_keys())
+            with pytest.raises(RuntimeError):
+                await t.get(m.__class__, m.get_keys())
 
-        self.assertEqual(a_cache._state, ModelState.CLEAN)
-        self.assertEqual(d_cache._state, ModelState.CLEAN)
+        assert a_cache._state == ModelState.CLEAN
+        assert d_cache._state == ModelState.CLEAN
 
-        self.assertEqual(a_cache, a)
-        self.assertEqual(d_cache, d)
-        self.assertEqual(d_cache.v, 44)
+        assert a_cache == a
+        assert d_cache == d
+        assert d_cache.v == 44

@@ -1,7 +1,8 @@
 from typing import List, Optional
-from .base import TestBase
 
-from restio.model import mdataclass, BaseModel, PrimaryKey, pk
+import pytest
+
+from restio.model import BaseModel, PrimaryKey, mdataclass, pk
 
 
 @mdataclass
@@ -55,188 +56,184 @@ class ModelE(BaseModel):
     ref: Optional[ModelD] = None
 
 
-class TestPrimaryKey(TestBase):
+class TestPrimaryKey:
 
     def test_equal(self):
         x = PrimaryKey(int, 1)
         y = PrimaryKey(str, "2")
 
-        self.assertEqual(x, 1)
-        self.assertEqual(x, PrimaryKey(int, 1))
-        self.assertEqual(y, "2")
-        self.assertEqual(y, PrimaryKey(str, "2"))
+        assert x == 1
+        assert x, PrimaryKey(int == 1)
+        assert y == "2"
+        assert y, PrimaryKey(str == "2")
 
     def test_not_equal(self):
         x = PrimaryKey(int, 1)
         y = PrimaryKey(str, "2")
 
-        self.assertNotEqual(x, 2)
-        self.assertNotEqual(x, PrimaryKey(int, 2))
-        self.assertNotEqual(x, "1")
-        self.assertNotEqual(x, PrimaryKey(str, "1"))
-        self.assertNotEqual(y, "1")
-        self.assertNotEqual(y, PrimaryKey(str, "1"))
-        self.assertNotEqual(y, 2)
-        self.assertNotEqual(y, PrimaryKey(int, 2))
+        assert x != 2
+        assert x, PrimaryKey(int != 2)
+        assert x != "1"
+        assert x, PrimaryKey(str != "1")
+        assert y != "1"
+        assert y, PrimaryKey(str != "1")
+        assert y != 2
+        assert y, PrimaryKey(int != 2)
 
     def test_set(self):
         x = PrimaryKey(int, 0)
         type_error = "Primary key value must be of type"
-        self.assertEqual(x.value, 0)
+        assert x.value == 0
 
         x.set(1)
-        self.assertEqual(x.value, 1)
+        assert x.value == 1
 
-        with self.assertRaises(RuntimeError) as ex:
+        with pytest.raises(RuntimeError, match=type_error):
             x.set("1")
-        self.assertIn(type_error, str(ex.exception))
 
 
-class TestModel(TestBase):
+class TestModel:
 
-    def test_primary_key_int(self):
-        x = ModelSinglePKInt()
-        x.set_keys(PrimaryKey(int, 1))
+    @pytest.fixture
+    def a(self):
+        return ModelA()
 
-        self.assertEqual(x.id.value, 1)
-        self.assertEqual(x.get_keys(), (1,))
+    @pytest.fixture
+    def b(self):
+        return ModelB()
 
-    def test_primary_key_str(self):
-        x = ModelSinglePKStr()
-        x.set_keys(("1"))
+    @pytest.fixture
+    def c(self):
+        return ModelC()
 
-        self.assertEqual(x.id.value, "1")
-        self.assertEqual(x.get_keys(), ("1",))
+    @pytest.fixture
+    def single_int(self):
+        return ModelSinglePKInt()
 
-    def test_primary_key_double_int_str(self):
-        x = ModelDoublePKIntStr()
-        x.set_keys((1, "2"))
+    @pytest.fixture
+    def single_str(self):
+        return ModelSinglePKStr()
 
-        self.assertEqual(x.id.value, 1)
-        self.assertEqual(x.key.value, "2")
-        self.assertEqual(x.get_keys(), (1, "2"))
+    @pytest.fixture
+    def double_is(self):
+        return ModelDoublePKIntStr()
 
-    def test_primary_key_double_str_int(self):
-        x = ModelDoublePKStrInt()
-        x.set_keys(("1", 2))
+    @pytest.fixture
+    def double_si(self):
+        return ModelDoublePKStrInt()
 
-        self.assertEqual(x.key.value, "1")
-        self.assertEqual(x.id.value, 2)
-        self.assertEqual(x.get_keys(), ("1", 2))
+    def test_primary_key_int(self, single_int):
+        single_int.set_keys(PrimaryKey(int, 1))
+
+        assert single_int.id.value == 1
+        assert single_int.get_keys() == (1,)
+
+    def test_primary_key_str(self, single_str):
+        single_str.set_keys(("1"))
+
+        assert single_str.id.value == "1"
+        assert single_str.get_keys() == ("1",)
+
+    def test_primary_key_double_int_str(self, double_is):
+        double_is.set_keys((1, "2"))
+
+        assert double_is.id.value == 1
+        assert double_is.key.value == "2"
+        assert double_is.get_keys(), (1 == "2")
+
+    def test_primary_key_double_str_int(self, double_si):
+        double_si.set_keys(("1", 2))
+
+        assert double_si.key.value == "1"
+        assert double_si.id.value == 2
+        assert double_si.get_keys(), ("1" == 2)
 
     def test_primary_key_type_error(self):
         PrimaryKey(int)
         PrimaryKey(str)
 
-        with self.assertRaises(TypeError):
+        with pytest.raises(TypeError):
             PrimaryKey(object)
 
-    def test_primary_key_set_error(self):
-        x = ModelSinglePKInt()
-        b = ModelB()
+    def test_primary_key_set_error(self, single_int, b):
+        with pytest.raises(RuntimeError, match="Type str on position 0 incompatible"):
+            single_int.set_keys(("1"))
 
-        with self.assertRaises(RuntimeError) as ex:
-            x.set_keys(("1"))
+        single_int.set_keys((2,))
+        assert single_int.id.value == 2
+        assert single_int.get_keys() == (2,)
 
-        self.assertIn("Type str on position 0 incompatible",
-                      str(ex.exception))
+        single_int.set_keys([3])
+        assert single_int.id.value == 3
+        assert single_int.get_keys() == (3,)
 
-        x.set_keys((2,))
-        self.assertEqual(x.id.value, 2)
-        self.assertEqual(x.get_keys(), (2,))
-
-        x.set_keys([3])
-        self.assertEqual(x.id.value, 3)
-        self.assertEqual(x.get_keys(), (3,))
-
-        with self.assertRaises(RuntimeError) as ex:
+        with pytest.raises(RuntimeError, match="This object does not contain primary keys."):
             b.set_keys((1))
 
-        self.assertIn("This object does not contain primary keys.",
-                      str(ex.exception))
+        with pytest.raises(RuntimeError, match="The number of primary keys provided is incompatible."):
+            single_int.set_keys((1, 2))
 
-        with self.assertRaises(RuntimeError) as ex:
-            x.set_keys((1, 2))
+    def test_get_mutable(self, a, b):
+        assert set(a._get_mutable_fields().keys()), set(['id', 'a' == 'b'])
+        assert set(b._get_mutable_fields().keys()), set(['ref' == 'c'])
 
-        self.assertIn("The number of primary keys provided is incompatible.",
-                      str(ex.exception))
-
-    def test_get_mutable(self):
-        x = ModelA()
-        y = ModelB()
-
-        self.assertSetEqual(set(x._get_mutable_fields().keys()), set(['id', 'a', 'b']))
-        self.assertSetEqual(set(y._get_mutable_fields().keys()), set(['ref', 'c']))
-
-    def test_copy(self):
-        a = ModelA()
-        b = ModelB()
-        c = ModelC()
-
+    def test_copy(self, a, b, c):
         a.set_keys(1)
-        a.a = 2
-        a.b = "3"
+        a.a, a.b = 2, "3"
 
-        b.ref = a
-        b.c = 4
-
-        c.ref = [b]
-        c.d = "5"
+        b.ref, b.c = a, 4
+        c.ref, c.d = [b], "5"
 
         c_c = c.copy()
         c_b = c_c.ref[0]
         c_a = c_b.ref
 
-        self.assertEqual(c_a.id, 1)
-        self.assertEqual(c_a.a, 2)
-        self.assertEqual(c_a.b, "3")
-        self.assertEqual(c_b.c, 4)
-        self.assertEqual(c_c.d, "5")
+        assert c_a.id == 1
+        assert c_a.a == 2
+        assert c_a.b == "3"
+        assert c_b.c == 4
+        assert c_c.d == "5"
 
     def test_copy_circular(self):
         d = ModelD()
         e = ModelE()
 
-        e.ref = d
-        d.ref = e
-
+        e.ref, d.ref = d, e
         c_d = d.copy()
-        self.assertEqual(c_d.ref._internal_id, e._internal_id)
+
+        assert c_d.ref._internal_id == e._internal_id
 
     def test_get_children(self):
         a = ModelA()
         b = ModelB()
         c = ModelC()
 
-        c.ref = [b]
-        b.ref = a
+        c.ref, b.ref = [b], a
 
         all_children = c.get_children(True)
-        self.assertIn(a, all_children)
-        self.assertIn(b, all_children)
+        assert a in all_children
+        assert b in all_children
 
         one_child = c.get_children(False)
-        self.assertIn(b, one_child)
-        self.assertNotIn(a, one_child)
+        assert b in one_child
+        assert a not in one_child
 
     def test_get_children_circular(self):
         b = ModelB()
         c = ModelC()
 
-        c.ref = set([b])
-        b.ref = c
-
+        c.ref, b.ref = set([b]), c
         one_child = c.get_children(True)
-        self.assertIn(b, one_child)
-        self.assertNotIn(c, one_child)
+
+        assert b in one_child
+        assert c not in one_child
 
     def test_equal(self):
-        a1 = ModelA()
-        a2 = ModelA()
+        a1, a2 = ModelA(), ModelA()
         a3 = a1.copy()
 
-        self.assertNotEqual(a1, a2)
-        self.assertEqual(a1, a3)
+        assert a1 != a2
+        assert a1 == a3
 
         a3.set_keys(1)
-        self.assertEqual(a1, a3)
+        assert a1 == a3
