@@ -1,9 +1,10 @@
 from typing import List
-from .base import TestBase
 
-from restio.model import BaseModel, PrimaryKey, pk, mdataclass
-from restio.query import query
+import pytest
+
 from restio.cache import ModelCache, QueryCache
+from restio.model import BaseModel, PrimaryKey, mdataclass, pk
+from restio.query import query
 
 
 @mdataclass
@@ -25,24 +26,27 @@ async def ArgsQuery(self, arg1: int, arg2: int = 2) -> List[BaseModel]:
     return [m1, m2]
 
 
-class TestModelCache(TestBase):
-
-    def setUp(self):
+class TestModelCache:
+    def setup_method(self, method):
         self.x = ModelCache()
         self.m = Model()
 
-    def test_init(self):
-        self.assertDictEqual(self.x._cache, {})
+    @pytest.fixture
+    def cache(self):
+        return ModelCache()
 
-    def test_register_unique_internal_id(self):
+    def test_init(self, cache):
+        assert cache._cache == {}
+
+    def test_register_unique_internal_id(self, cache):
         # Checks if model does not exist in cache
-        self.assertIsNone(self.x.get_by_internal_id(Model, self.m._internal_id))
+        assert cache.get_by_internal_id(Model, self.m._internal_id) is None
         # Registers model in cache
-        self.assertTrue(self.x.register(self.m))
+        assert cache.register(self.m)
         # Tries to register the same model again
-        self.assertFalse(self.x.register(self.m))
+        assert not cache.register(self.m)
 
-    def test_register_unique_primary_key(self):
+    def test_register_unique_primary_key(self, cache: ModelCache):
         # Model with unique key 1
         m2 = Model()
         m2.set_keys(1)
@@ -52,14 +56,14 @@ class TestModelCache(TestBase):
         m3.set_keys(1)
 
         # Registers model with unique key 1
-        self.assertTrue(self.x.register(m2))
+        assert cache.register(m2)
 
         # Tries to register same model and different model
         # with same primary key
-        self.assertFalse(self.x.register(m2))
-        self.assertFalse(self.x.register(m3))
+        assert not cache.register(m2)
+        assert not cache.register(m3)
 
-    def test_register_force(self):
+    def test_register_force(self, cache):
         # Model with unique key 1
         m2 = Model()
         m2.set_keys(1)
@@ -69,14 +73,14 @@ class TestModelCache(TestBase):
         m3.set_keys(1)
 
         # Registers model with unique key 1
-        self.assertTrue(self.x.register(m2))
+        assert cache.register(m2)
 
         # Tries to register same model and different model
         # with same primary key
-        self.assertTrue(self.x.register(m2, True))
-        self.assertTrue(self.x.register(m3, True))
+        assert cache.register(m2, True)
+        assert cache.register(m3, True)
 
-    def test_unregister(self):
+    def test_unregister(self, cache):
         m2 = Model()
         m2.set_keys(1)
 
@@ -86,82 +90,95 @@ class TestModelCache(TestBase):
         m4 = Model()
         m4.set_keys(3)
 
-        self.assertTrue(self.x.register(m2))
-        self.assertTrue(self.x.register(m3))
+        assert cache.register(m2)
+        assert cache.register(m3)
 
-        self.x.unregister(m2)
-        with self.assertRaises(ValueError):
-            self.x.unregister(m4)
+        cache.unregister(m2)
+        with pytest.raises(ValueError):
+            cache.unregister(m4)
 
-        self.assertEqual(len(self.x._cache.values()), 1)
+        assert len(cache._cache.values()) == 1
 
-    def test_get_type(self):
-        self.x = ModelCache()
+    def test_get_type(self, cache):
 
-        self.assertEqual(len(self.x.get_type(Model)), 0)
-        self.test_register_unique_internal_id()
-        self.assertEqual(len(self.x.get_type(Model)), 1)
+        assert len(cache.get_type(Model)) == 0
+        self.test_register_unique_internal_id(cache)
+        assert len(cache.get_type(Model)) == 1
 
-        self.x = ModelCache()
+        cache = ModelCache()
 
-        self.assertEqual(len(self.x.get_type(Model)), 0)
-        self.test_register_unique_primary_key()
-        self.assertEqual(len(self.x.get_type(Model)), 1)
+        assert len(cache.get_type(Model)) == 0
+        self.test_register_unique_primary_key(cache)
+        assert len(cache.get_type(Model)) == 1
 
-    def test_get_by_internal_id(self):
-        self.test_register_unique_internal_id()
+    def test_get_by_internal_id(self, cache):
+        self.test_register_unique_internal_id(cache)
         # Checks if model now exists in cache
-        c = self.x.get_by_internal_id(Model, self.m._internal_id)
-        self.assertIsNotNone(c)
+        c = cache.get_by_internal_id(Model, self.m._internal_id)
+        assert c is not None
         # Checks if another type does not exist in cache
-        self.assertIsNone(self.x.get_by_internal_id(BaseModel, "fake"))
+        assert cache.get_by_internal_id(BaseModel, "fake") is None
 
-    def test_get(self):
-        self.test_register_unique_primary_key()
+    def test_get(self, cache):
+        self.test_register_unique_primary_key(cache)
         # Checks if model now exists in cache
-        self.assertIsNotNone(self.x.get(Model, (1,)))
+        assert cache.get(Model, (1,)) is not None
         # Checks if another type does not exist in cache
-        self.assertIsNone(self.x.get(BaseModel, (1,)))
+        assert cache.get(BaseModel, (1,)) is None
 
-    def test_get_key(self):
+    def test_get_key(self, cache):
         m = Model()
         m.set_keys(1)
 
-        self.x.register(m)
-        first_ref = self.x.get_by_internal_id(Model, m._internal_id)
-        second_ref = self.x.get(Model, m.id.get())
-        third_ref = self.x.get(Model, [m.id])
+        cache.register(m)
+        first_ref = cache.get_by_internal_id(Model, m._internal_id)
+        second_ref = cache.get(Model, m.id.get())
+        third_ref = cache.get(Model, [m.id])
 
-        self.assertEqual(first_ref, second_ref)
-        self.assertEqual(second_ref, third_ref)
+        assert first_ref == second_ref
+        assert second_ref == third_ref
 
 
-class TestQueryCache(TestBase):
-    @TestBase.async_test
-    async def setUp(self):
-        self.x = QueryCache()
-        self.q = SimpleQuery
-        self.qa = ArgsQuery(5, 6)
-        self.qaa = ArgsQuery(5, 7)
-        self.r = await self.q()
-        self.ra = await self.qa()
-        self.raa = await self.qaa()
+class TestQueryCache:
 
-    def test_init(self):
-        self.assertDictEqual(self.x._cache, {})
+    @pytest.fixture
+    def cache(self):
+        return QueryCache()
 
-    def test_register_noargs(self):
-        self.assertTrue(self.x.register(self.q, self.r))
-        self.assertFalse(self.x.register(self.q, self.r))
+    @pytest.fixture
+    async def query_simple(self):
+        q = SimpleQuery
+        return q, await q()
 
-    def test_get_noargs(self):
-        self.test_register_noargs()
-        self.assertListEqual(self.x.get(self.q), self.r)
-        self.assertListEqual(self.x.get(self.q.__hash__()), self.r)
+    @pytest.fixture
+    async def query_args_first(self):
+        q = ArgsQuery(5, 6)
+        return q, await q()
 
-    def test_register_args(self):
-        self.assertTrue(self.x.register(self.qa, self.ra))
-        self.assertFalse(self.x.register(self.qa, self.ra))
+    @pytest.fixture
+    async def query_args_second(self):
+        q = ArgsQuery(5, 7)
+        return q, await q()
 
-        self.assertTrue(self.x.register(self.qaa, self.raa))
-        self.assertFalse(self.x.register(self.qaa, self.raa))
+    def test_init(self, cache):
+        assert cache._cache == {}
+
+    def test_register_noargs(self, cache, query_simple):
+        q, r = query_simple
+        assert cache.register(q, r)
+        assert not cache.register(q, r)
+
+    def test_get_noargs(self, cache, query_simple):
+        self.test_register_noargs(cache, query_simple)
+        q, r = query_simple
+        assert cache.get(q) == r
+        assert cache.get(q.__hash__()) == r
+
+    def test_register_args(self, cache, query_args_first, query_args_second):
+        qa, ra = query_args_first
+        qaa, raa = query_args_second
+        assert cache.register(qa, ra)
+        assert not cache.register(qa, ra)
+
+        assert cache.register(qaa, raa)
+        assert not cache.register(qaa, raa)

@@ -11,6 +11,7 @@ yapf = "*"
 rope = "*"
 pytest = "*"
 pytest-azurepipelines = "*"
+pytest-asyncio = "*"
 
 [packages]
 restio = {editable = true,path = "."}

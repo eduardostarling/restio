@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from typing import Generic, TypeVar, Dict, Tuple, List, Union, Type, Any, Optional, get_type_hints, overload, cast
 from copy import deepcopy
-from dataclasses import dataclass, field
-from uuid import uuid4, UUID
+from dataclasses import dataclass, field, fields
+from typing import (Any, Dict, Generic, List, Optional, Tuple, Type, TypeVar,
+                    Union, cast, get_type_hints, overload)
+from uuid import UUID, uuid4
 
 from .state import ModelState
 
@@ -65,20 +66,31 @@ class BaseModel(Generic[T]):
         hash=False
     )
 
-    @staticmethod
-    def __get_primary_keys(cls) -> Dict[str, type]:
+    @classmethod
+    def __get_primary_keys(cls, instance) -> Dict[str, type]:
+        resolved_field_types = cls.__get_resolved_types(instance)
         return {
-            attr: t.__args__[0]
-            for attr, t in get_type_hints(cls).items() if hasattr(t, '__origin__') and t.__origin__ is PrimaryKey
+            name: t.__args__[0] for name, t in resolved_field_types.items()
+            if hasattr(t, '__origin__') and t.__origin__ is PrimaryKey
         }
 
-    @staticmethod
-    def __get_typed_fields(cls) -> Dict[str, type]:
+    @classmethod
+    def __get_typed_fields(cls, instance) -> Dict[str, type]:
+        resolved_field_types = cls.__get_resolved_types(instance)
         return {
-            attr: t
-            for attr, t in get_type_hints(cls).items()
+            attr: t for attr, t in resolved_field_types.items()
             if not hasattr(t, '__origin__') or (hasattr(t, '__origin__') and t.__origin__ is not PrimaryKey)
         }
+
+    @classmethod
+    def __get_resolved_types(cls, instance):
+        try:
+            resolved_hints = get_type_hints(instance)
+        except Exception:
+            resolved_hints = get_type_hints(instance.__class__)
+
+        field_names = [field.name for field in fields(instance)]
+        return {name: resolved_hints[name] for name in field_names if name in resolved_hints}
 
     def get_primary_keys(self) -> Tuple[PrimaryKey, ...]:
         return tuple([cast(PrimaryKey, getattr(self, key)) for key in self.__get_primary_keys(self)])
@@ -123,7 +135,7 @@ class BaseModel(Generic[T]):
             if not issubclass(attr_types[index], primary_key._type):
                 raise RuntimeError(
                     f'Type {primary_key._type.__name__} on position {index} incompatible' +
-                    ' with {attr_keys[index]} of type {attr_types[index].__name__}'
+                    f' with {attr_keys[index]} of type {attr_types[index].__name__}'
                 )
             setattr(self, attr_keys[index], primary_key)
 
@@ -137,8 +149,8 @@ class BaseModel(Generic[T]):
         return {k: getattr(self, k) for k in (attrs - set(self._immutable))}
 
     def get_children(
-        self, recursive: bool = False, children: List['BaseModel'] = None, top_level: Optional['BaseModel'] = None
-    ) -> List['BaseModel']:
+        self, recursive: bool = False, children: List[BaseModel] = None, top_level: Optional[BaseModel] = None
+    ) -> List[BaseModel]:
 
         if children is None:
             children = []
@@ -195,7 +207,7 @@ class BaseModel(Generic[T]):
     def _persist(self):
         self._persistent_values = {}
 
-    def _update(self, model: 'BaseModel') -> bool:
+    def _update(self, model: BaseModel) -> bool:
         persistent_model = self._get_persistent_model()
         modified_values = persistent_model._get_modified_values(model)
 
