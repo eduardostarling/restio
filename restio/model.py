@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass, field, fields
-from typing import (Any, Dict, Generic, List, Optional, Tuple, Type, TypeVar,
-                    Union, cast, get_type_hints, overload)
+from dataclasses import dataclass, field, is_dataclass
+from typing import (Any, Dict, ForwardRef, Generic, List, Optional, Set, Tuple,
+                    Type, TypeVar, Union, cast, overload)
 from uuid import UUID, uuid4
 
 from .state import ModelState
@@ -53,50 +53,83 @@ def pk(key_type: Type[T], default_value: Optional[T] = None, **kwargs):
     return field(default=PrimaryKey(key_type, default_value), **kwargs)
 
 
+class BaseModelMeta(type):
+    def __new__(cls, name, bases, dct):
+        x = super().__new__(cls, name, bases, dct)
+
+        if name == 'BaseModel' or is_dataclass(x):
+            x._class_primary_keys = {}
+            x._class_typed_fields = {}
+            x._class_mutable = set()
+            x._class_immutable = set()
+
+            for base in bases:
+                if is_dataclass(base):
+                    try:
+                        x._class_primary_keys.update(base._class_primary_keys)
+                        x._class_typed_fields.update(base._class_typed_fields)
+                        x._class_immutable.update(base._class_immutable)
+                    except Exception:
+                        pass
+
+            ann = dct.get('__annotations__', [])
+            for field_name, field_type in ann.items():
+                if field_name.startswith('_'):
+                    x._class_immutable.add(field_name)
+                else:
+                    field_type = cls.evaluate_type(field_type)
+                    if cls.is_primary_key(field_type):
+                        x._class_primary_keys.update({field_name: cls.primary_key_type(field_type)})
+                    else:
+                        x._class_typed_fields.update({field_name: field_type})
+
+            mutable = (set(x._class_primary_keys.keys()) | set(x._class_typed_fields.keys())) - set(x._class_immutable)
+            x._class_mutable = mutable
+
+        return x
+
+    @classmethod
+    def evaluate_type(cls, field_type):
+        if isinstance(field_type, str):
+            try:
+                return ForwardRef(field_type, is_argument=False)._evaluate(globals(), locals())
+            except Exception:
+                pass
+
+        return field_type
+
+    @classmethod
+    def is_primary_key(cls, field_type):
+        return hasattr(field_type, '__origin__') and field_type.__origin__ is PrimaryKey
+
+    @classmethod
+    def primary_key_type(cls, field_type):
+        return field_type.__args__[0]
+
+
 @mdataclass
-class BaseModel(Generic[T]):
+class BaseModel(Generic[T], metaclass=BaseModelMeta):
     _internal_id: UUID = field(default_factory=uuid4)
     _state: ModelState = field(init=False, repr=False, compare=False, hash=False, default=ModelState.CLEAN)
     _persistent_values: Dict[str, Any] = field(init=False, repr=False, compare=False, hash=False, default_factory=dict)
-    _immutable: List[str] = field(
-        default_factory=lambda: ['_immutable', '_internal_id', '_state', '_persistent_values'],
-        repr=False,
-        init=False,
-        compare=False,
-        hash=False
-    )
+    _primary_keys: Tuple[Optional[T], ...] = field(repr=False, init=False, compare=False, hash=False)
+    _typed_fields: Dict[str, type] = field(repr=False, init=False, compare=False, hash=False)
+    _mutable: Set[str] = field(repr=False, init=False, compare=False, hash=False)
+    _immutable: Set[str] = field(repr=False, init=False, compare=False, hash=False)
 
-    @classmethod
-    def __get_primary_keys(cls, instance) -> Dict[str, type]:
-        resolved_field_types = cls.__get_resolved_types(instance)
-        return {
-            name: t.__args__[0] for name, t in resolved_field_types.items()
-            if hasattr(t, '__origin__') and t.__origin__ is PrimaryKey
-        }
+    def __post_init__(self):
+        self._primary_keys = self.get_primary_keys()
+        self._typed_fields = self.__class__._class_typed_fields
+        self._mutable = self.__class__._class_mutable
+        self._immutable = self.__class__._class_immutable
 
-    @classmethod
-    def __get_typed_fields(cls, instance) -> Dict[str, type]:
-        resolved_field_types = cls.__get_resolved_types(instance)
-        return {
-            attr: t for attr, t in resolved_field_types.items()
-            if not hasattr(t, '__origin__') or (hasattr(t, '__origin__') and t.__origin__ is not PrimaryKey)
-        }
-
-    @classmethod
-    def __get_resolved_types(cls, instance):
-        try:
-            resolved_hints = get_type_hints(instance)
-        except Exception:
-            resolved_hints = get_type_hints(instance.__class__)
-
-        field_names = [field.name for field in fields(instance)]
-        return {name: resolved_hints[name] for name in field_names if name in resolved_hints}
-
-    def get_primary_keys(self) -> Tuple[PrimaryKey, ...]:
-        return tuple([cast(PrimaryKey, getattr(self, key)) for key in self.__get_primary_keys(self)])
+    def get_primary_keys(self) -> Tuple[Optional[T], ...]:
+        return tuple([
+            cast(PrimaryKey, getattr(self, key)).get()
+            for key in self.__class__._class_primary_keys])
 
     def get_keys(self) -> Tuple[Optional[T], ...]:
-        return tuple([key.get() for key in self.get_primary_keys()])
+        return self._primary_keys
 
     @overload
     def set_keys(self, primary_keys: Tuple[ValueKey, ...]):
@@ -111,9 +144,8 @@ class BaseModel(Generic[T]):
         ...
 
     def set_keys(self, primary_keys):
-        attrs = self.__get_primary_keys(self)
-
-        if not attrs:
+        keys = self.__class__._class_primary_keys
+        if not keys:
             raise RuntimeError("This object does not contain primary keys.")
 
         if isinstance(primary_keys, list):
@@ -122,11 +154,11 @@ class BaseModel(Generic[T]):
         if not isinstance(primary_keys, tuple):
             primary_keys = (primary_keys,)
 
-        if len(attrs) != len(primary_keys):
+        if len(keys) != len(primary_keys):
             raise RuntimeError("The number of primary keys provided is incompatible.")
 
-        attr_keys = list(attrs.keys())
-        attr_types = list(attrs.values())
+        attr_keys = list(keys.keys())
+        attr_types = list(keys.values())
 
         for index, primary_key in enumerate(primary_keys):
             if not isinstance(primary_key, PrimaryKey):
@@ -139,14 +171,13 @@ class BaseModel(Generic[T]):
                 )
             setattr(self, attr_keys[index], primary_key)
 
+        self._primary_keys = primary_keys
+
     def copy(self) -> BaseModel:  # noqa: F821
         return deepcopy(self)
 
     def _get_mutable_fields(self) -> Dict[str, Any]:
-        attrs = set(BaseModel.__get_primary_keys(self.__class__)) | \
-            set(BaseModel.__get_typed_fields(self.__class__))
-
-        return {k: getattr(self, k) for k in (attrs - set(self._immutable))}
+        return {k: getattr(self, k) for k in self._mutable}
 
     def get_children(
         self, recursive: bool = False, children: List[BaseModel] = None, top_level: Optional[BaseModel] = None

@@ -525,7 +525,7 @@ class TestTransaction:
         assert a_cache is not None
         assert a_cache._state == ModelState.DELETED
 
-        assert set(ex.models), set([f, e, d == b])
+        assert set(ex.models) == set([f, e, d, b])
         assert len(ex.errors) == 1
         assert ex.errors[0].model == a
 

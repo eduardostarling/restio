@@ -96,11 +96,11 @@ class TestModel:
 
     @pytest.fixture
     def a(self):
-        return ModelA()
+        return ModelA(a=1, b='a')
 
     @pytest.fixture
     def b(self):
-        return ModelB()
+        return ModelB(c='b')
 
     @pytest.fixture
     def c(self):
@@ -174,8 +174,10 @@ class TestModel:
             single_int.set_keys((1, 2))
 
     def test_get_mutable(self, a, b):
-        assert set(a._get_mutable_fields().keys()), set(['id', 'a' == 'b'])
-        assert set(b._get_mutable_fields().keys()), set(['ref' == 'c'])
+        assert set(a._mutable) == set(['id', 'a', 'b'])
+        assert set(b._mutable) == set(['ref', 'c'])
+        assert set(a._get_mutable_fields().values()) == set([PrimaryKey(int, None), 1, 'a'])
+        assert set(b._get_mutable_fields().values()) == set([None, 'b'])
 
     def test_copy(self, a, b, c):
         a.set_keys(1)

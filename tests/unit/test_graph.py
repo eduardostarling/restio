@@ -167,7 +167,7 @@ class TestNode(ModelsFixture):
         all_children = node_a.get_children(recursive=True)
 
         assert set(children) == set([node_c])
-        assert set(all_children), set([node_c, node_e == node_f])
+        assert set(all_children) == set([node_c, node_e, node_f])
 
     def test_equal(self, models, nodes):
         node_a = nodes[0]
@@ -283,7 +283,7 @@ class TestGraph(ModelsFixture):
         assert len(first_tree_roots) == 1
         assert len(second_tree_roots) == 2
         assert set(map(lambda x: x.node_object, first_tree_roots)) == set([model_g])
-        assert set(map(lambda x: x.node_object, second_tree_roots)), set([model_a == model_b])
+        assert set(map(lambda x: x.node_object, second_tree_roots)) == set([model_a, model_b])
 
     def test_circular_dependency(self, models):
         # slow test ahead
