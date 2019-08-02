@@ -14,6 +14,7 @@ pytest-azurepipelines = "*"
 pytest-asyncio = "*"
 pytest-xdist = "*"
 pytest-cov = "*"
+requests = "*"
 
 [packages]
 restio = {editable = true,path = "."}
