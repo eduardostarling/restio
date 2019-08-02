@@ -1,5 +1,5 @@
-from typing import Dict, List, Set, Tuple, Optional, Type, overload
 from collections.abc import Hashable
+from typing import Dict, List, Optional, Set, Tuple, Type, overload
 from uuid import UUID
 
 from .model import BaseModel, ValueKey
@@ -62,7 +62,8 @@ class ModelCache:
     def get_type(self, filter_type: Type[BaseModel]) -> Dict[Tuple[str, str], BaseModel]:
         return {
             (model_type, model_hash): model
-            for (model_type, model_hash), model in self._cache.items() if filter_type.__name__ == model_type
+            for (model_type, model_hash), model in self._cache.items()
+            if filter_type.__name__ == model_type
         }
 
     @overload
