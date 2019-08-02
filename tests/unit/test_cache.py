@@ -48,12 +48,10 @@ class TestModelCache:
 
     def test_register_unique_primary_key(self, cache: ModelCache):
         # Model with unique key 1
-        m2 = Model()
-        m2.set_keys(1)
+        m2 = Model(id=1)
 
         # Model with duplicated key 1
-        m3 = Model()
-        m3.set_keys(1)
+        m3 = Model(id=1)
 
         # Registers model with unique key 1
         assert cache.register(m2)
@@ -65,12 +63,9 @@ class TestModelCache:
 
     def test_register_force(self, cache):
         # Model with unique key 1
-        m2 = Model()
-        m2.set_keys(1)
-
+        m2 = Model(id=1)
         # Model with duplicated key 1
-        m3 = Model()
-        m3.set_keys(1)
+        m3 = Model(id=1)
 
         # Registers model with unique key 1
         assert cache.register(m2)
@@ -81,14 +76,9 @@ class TestModelCache:
         assert cache.register(m3, True)
 
     def test_unregister(self, cache):
-        m2 = Model()
-        m2.set_keys(1)
-
-        m3 = Model()
-        m3.set_keys(2)
-
-        m4 = Model()
-        m4.set_keys(3)
+        m2 = Model(id=1)
+        m3 = Model(id=2)
+        m4 = Model(id=3)
 
         assert cache.register(m2)
         assert cache.register(m3)
@@ -128,11 +118,11 @@ class TestModelCache:
 
     def test_get_key(self, cache):
         m = Model()
-        m.set_keys(1)
+        m.id = 1
 
         cache.register(m)
         first_ref = cache.get_by_internal_id(Model, m._internal_id)
-        second_ref = cache.get(Model, m.id.get())
+        second_ref = cache.get(Model, m.id)
         third_ref = cache.get(Model, [m.id])
 
         assert first_ref == second_ref

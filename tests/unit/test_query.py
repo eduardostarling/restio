@@ -43,7 +43,7 @@ class TestQueryCache:
     async def test_query_result(self):
         q = ArgsQuery(arg1=1, arg2=2)
 
-        assert await q("text"), ("text" == 2)
+        assert await q("text") == ("text", 2)
 
     def test_invalid_query(self):
         with pytest.raises(AttributeError):

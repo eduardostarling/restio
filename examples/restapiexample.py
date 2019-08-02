@@ -52,7 +52,7 @@ class EmployeeDAO(BaseDAO):
 
     def _get_model(self, json):
         return Employee(
-            id=PrimaryKey(int, int(json['id'])), name=str(json['employee_name']),
+            id=int(json['id']), name=str(json['employee_name']),
             age=int(json['employee_age']), salary=float(json['employee_salary']))
 
 
@@ -78,7 +78,7 @@ async def main():
     print("First employee: ", employees[0])
 
     # gets the primary keys
-    employee_id = employees[0].id.get()
+    employee_id = employees[0].id
 
     # resets the transaction by clearing the cache
     t.reset()
@@ -88,9 +88,9 @@ async def main():
     # first call will make the request, while the rest
     # will be ignored
     employee: Optional[Employee]
-
-    for _ in range(0, 10):
+    for _ in range(0, 100):
         employee = await t.get(Employee, employee_id)
+
     print("Manually loaded employee: ", employee)
 
 if __name__ == "__main__":

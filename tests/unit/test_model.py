@@ -63,22 +63,22 @@ class TestPrimaryKey:
         y = PrimaryKey(str, "2")
 
         assert x == 1
-        assert x, PrimaryKey(int == 1)
+        assert x == PrimaryKey(int, 1)
         assert y == "2"
-        assert y, PrimaryKey(str == "2")
+        assert y == PrimaryKey(str, "2")
 
     def test_not_equal(self):
         x = PrimaryKey(int, 1)
         y = PrimaryKey(str, "2")
 
         assert x != 2
-        assert x, PrimaryKey(int != 2)
+        assert x != PrimaryKey(int, 2)
         assert x != "1"
-        assert x, PrimaryKey(str != "1")
+        assert x != PrimaryKey(str, "1")
         assert y != "1"
-        assert y, PrimaryKey(str != "1")
+        assert y != PrimaryKey(str, "1")
         assert y != 2
-        assert y, PrimaryKey(int != 2)
+        assert y != PrimaryKey(int, 2)
 
     def test_set(self):
         x = PrimaryKey(int, 0)
@@ -123,30 +123,30 @@ class TestModel:
         return ModelDoublePKStrInt()
 
     def test_primary_key_int(self, single_int):
-        single_int.set_keys(PrimaryKey(int, 1))
+        single_int.id = PrimaryKey(int, 1)
 
-        assert single_int.id.value == 1
+        assert single_int.id == 1
         assert single_int.get_keys() == (1,)
 
     def test_primary_key_str(self, single_str):
-        single_str.set_keys(("1"))
+        single_str.id = "1"
 
-        assert single_str.id.value == "1"
+        assert single_str.id == "1"
         assert single_str.get_keys() == ("1",)
 
     def test_primary_key_double_int_str(self, double_is):
-        double_is.set_keys((1, "2"))
+        double_is.id, double_is.key = 1, "2"
 
-        assert double_is.id.value == 1
-        assert double_is.key.value == "2"
-        assert double_is.get_keys(), (1 == "2")
+        assert double_is.id == 1
+        assert double_is.key == "2"
+        assert double_is.get_keys() == (1, "2")
 
     def test_primary_key_double_str_int(self, double_si):
-        double_si.set_keys(("1", 2))
+        double_si.key, double_si.id = "1", 2
 
-        assert double_si.key.value == "1"
-        assert double_si.id.value == 2
-        assert double_si.get_keys(), ("1" == 2)
+        assert double_si.key == "1"
+        assert double_si.id == 2
+        assert double_si.get_keys() == ("1", 2)
 
     def test_primary_key_type_error(self):
         PrimaryKey(int)
@@ -156,31 +156,25 @@ class TestModel:
             PrimaryKey(object)
 
     def test_primary_key_set_error(self, single_int, b):
-        with pytest.raises(RuntimeError, match="Type str on position 0 incompatible"):
-            single_int.set_keys(("1"))
+        with pytest.raises(RuntimeError, match="value must be of type"):
+            single_int.id = "1"
 
-        single_int.set_keys((2,))
-        assert single_int.id.value == 2
+        single_int.id = 2
+        assert single_int.id == 2
         assert single_int.get_keys() == (2,)
 
-        single_int.set_keys([3])
-        assert single_int.id.value == 3
+        single_int.id = 3
+        assert single_int.id == 3
         assert single_int.get_keys() == (3,)
-
-        with pytest.raises(RuntimeError, match="This object does not contain primary keys."):
-            b.set_keys((1))
-
-        with pytest.raises(RuntimeError, match="The number of primary keys provided is incompatible."):
-            single_int.set_keys((1, 2))
 
     def test_get_mutable(self, a, b):
         assert set(a._mutable) == set(['id', 'a', 'b'])
         assert set(b._mutable) == set(['ref', 'c'])
-        assert set(a._get_mutable_fields().values()) == set([PrimaryKey(int, None), 1, 'a'])
+        assert set(a._get_mutable_fields().values()) == set([None, 1, 'a'])
         assert set(b._get_mutable_fields().values()) == set([None, 'b'])
 
     def test_copy(self, a, b, c):
-        a.set_keys(1)
+        a.id = 1
         a.a, a.b = 2, "3"
 
         b.ref, b.c = a, 4
@@ -237,5 +231,5 @@ class TestModel:
         assert a1 != a2
         assert a1 == a3
 
-        a3.set_keys(1)
+        a3.id = 1
         assert a1 == a3
