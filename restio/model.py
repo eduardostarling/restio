@@ -50,7 +50,7 @@ def mdataclass(*args, **kwargs):
 
 
 def pk(key_type: Type[T], default_value: Optional[T] = None, **kwargs):
-    return field(default=PrimaryKey(key_type, default_value), **kwargs)
+    return field(default_factory=lambda: PrimaryKey(key_type, default_value), **kwargs)
 
 
 class BaseModelMeta(type):
@@ -118,60 +118,18 @@ class BaseModel(Generic[T], metaclass=BaseModelMeta):
     _immutable: Set[str] = field(repr=False, init=False, compare=False, hash=False)
 
     def __post_init__(self):
-        self._primary_keys = self.get_primary_keys()
+        #self._primary_keys = self._get_primary_keys()
         self._typed_fields = self.__class__._class_typed_fields
         self._mutable = self.__class__._class_mutable
         self._immutable = self.__class__._class_immutable
 
-    def get_primary_keys(self) -> Tuple[Optional[T], ...]:
+    def _get_primary_keys(self) -> Tuple[Optional[T], ...]:
         return tuple([
-            cast(PrimaryKey, getattr(self, key)).get()
+            getattr(self, key)
             for key in self.__class__._class_primary_keys])
 
     def get_keys(self) -> Tuple[Optional[T], ...]:
         return self._primary_keys
-
-    @overload
-    def set_keys(self, primary_keys: Tuple[ValueKey, ...]):
-        ...
-
-    @overload
-    def set_keys(self, primary_keys: List[ValueKey]):
-        ...
-
-    @overload
-    def set_keys(self, primary_keys: ValueKey):
-        ...
-
-    def set_keys(self, primary_keys):
-        keys = self.__class__._class_primary_keys
-        if not keys:
-            raise RuntimeError("This object does not contain primary keys.")
-
-        if isinstance(primary_keys, list):
-            primary_keys = tuple(primary_keys)
-
-        if not isinstance(primary_keys, tuple):
-            primary_keys = (primary_keys,)
-
-        if len(keys) != len(primary_keys):
-            raise RuntimeError("The number of primary keys provided is incompatible.")
-
-        attr_keys = list(keys.keys())
-        attr_types = list(keys.values())
-
-        for index, primary_key in enumerate(primary_keys):
-            if not isinstance(primary_key, PrimaryKey):
-                primary_key = PrimaryKey(type(primary_key), primary_key)
-
-            if not issubclass(attr_types[index], primary_key._type):
-                raise RuntimeError(
-                    f'Type {primary_key._type.__name__} on position {index} incompatible' +
-                    f' with {attr_keys[index]} of type {attr_types[index].__name__}'
-                )
-            setattr(self, attr_keys[index], primary_key)
-
-        self._primary_keys = primary_keys
 
     def copy(self) -> BaseModel:  # noqa: F821
         return deepcopy(self)
@@ -262,3 +220,39 @@ class BaseModel(Generic[T], metaclass=BaseModelMeta):
 
     def __hash__(self):
         return hash(str(self._internal_id))
+
+    def __setattr__(self, name, value):
+        if name in self.__class__._class_primary_keys:
+            if not isinstance(value, PrimaryKey):
+                value = PrimaryKey(type(value), value)
+
+            try:
+                key_attr = super(BaseModel, self).__getattribute__(name)
+            except AttributeError:
+                key_attr = None
+
+            if key_attr:
+                key_attr.set(value.get())
+            else:
+                super().__setattr__(name, value)
+
+            self._primary_keys = self._get_primary_keys()
+        else:
+            super().__setattr__(name, value)
+
+    def __getattribute__(self, name):
+        cls = object.__getattribute__(self, '__class__')
+        if name in cls._class_primary_keys:
+            try:
+                key_attr = super().__getattribute__(name)
+            except AttributeError:
+                key_attr = None
+
+            if isinstance(key_attr, PrimaryKey):
+                return key_attr.get()
+            else:
+                key_attr = PrimaryKey(cls._class_primary_keys[name], None)
+                super().__setattr__(name, key_attr)
+                return key_attr.get()
+        else:
+            return super().__getattribute__(name)
