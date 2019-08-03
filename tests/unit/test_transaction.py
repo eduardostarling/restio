@@ -66,9 +66,9 @@ class ModelDAOException(ModelDAO):
 async def SimpleQuery(self, query_arg: TestTransaction) -> List[ModelA]:
     global caller
 
-    a = ModelA(key=PrimaryKey(int, 1), v=11)
-    b = ModelA(key=PrimaryKey(int, 2), v=22, ref=a)
-    c = ModelA(key=PrimaryKey(int, 3), v=33, ref=b)
+    a = ModelA(key=1, v=11)
+    b = ModelA(key=2, v=22, ref=a)
+    c = ModelA(key=3, v=33, ref=b)
 
     assert isinstance(query_arg, TestTransaction)
     assert isinstance(self, Transaction)
@@ -95,9 +95,9 @@ class TestTransaction:
           |
         A(11)
         """
-        a = ModelA(key=PrimaryKey(int, 1), v=11)
-        b = ModelA(key=PrimaryKey(int, 2), v=22, ref=a)
-        c = ModelA(key=PrimaryKey(int, 3), v=33, ref=b)
+        a = ModelA(key=1, v=11)
+        b = ModelA(key=2, v=22, ref=a)
+        c = ModelA(key=3, v=33, ref=b)
 
         return (a, b, c)
 
@@ -114,9 +114,9 @@ class TestTransaction:
         """
 
         a, b, c = models
-        d = ModelA(key=PrimaryKey(int, 4), v=44)
-        e = ModelA(key=PrimaryKey(int, 5), v=55, ref=d)
-        f = ModelA(key=PrimaryKey(int, 6), v=66, ref=d)
+        d = ModelA(key=4, v=44)
+        e = ModelA(key=5, v=55, ref=d)
+        f = ModelA(key=6, v=66, ref=d)
 
         return (a, b, c, d, e, f)
 
@@ -127,16 +127,16 @@ class TestTransaction:
         |   |   |   |   |
         B   D   F   H   J
         """
-        b = ModelA(key=PrimaryKey(int, 2), v=22)
-        a = ModelA(key=PrimaryKey(int, 1), v=11, ref=b)
-        d = ModelA(key=PrimaryKey(int, 4), v=44, ex=True)
-        c = ModelA(key=PrimaryKey(int, 3), v=33, ref=d)
-        f = ModelA(key=PrimaryKey(int, 6), v=66)
-        e = ModelA(key=PrimaryKey(int, 5), v=55, ref=f)
-        h = ModelA(key=PrimaryKey(int, 8), v=88)
-        g = ModelA(key=PrimaryKey(int, 7), v=77, ref=h)
-        j = ModelA(key=PrimaryKey(int, 10), v=100)
-        i = ModelA(key=PrimaryKey(int, 9), v=99, ref=j)
+        b = ModelA(key=2, v=22)
+        a = ModelA(key=1, v=11, ref=b)
+        d = ModelA(key=4, v=44, ex=True)
+        c = ModelA(key=3, v=33, ref=d)
+        f = ModelA(key=6, v=66)
+        e = ModelA(key=5, v=55, ref=f)
+        h = ModelA(key=8, v=88)
+        g = ModelA(key=7, v=77, ref=h)
+        j = ModelA(key=10, v=100)
+        i = ModelA(key=9, v=99, ref=j)
 
         models = tuple([a, b, c, d, e, f, g, h, i, j])
 
@@ -158,28 +158,30 @@ class TestTransaction:
         return Transaction()
 
     def test_init(self, t):
-        assert t._model_cache._cache == {}
+        assert t._model_cache._id_cache == {}
+        assert t._model_cache._key_cache == {}
         assert t._query_cache._cache == {}
 
     @pytest.mark.asyncio
     async def test_register_model(self, t):
-        a = ModelA(key=PrimaryKey(int, 1), v=11)
-        b = ModelA(key=PrimaryKey(int, 2), v=22)
+        a = ModelA(key=1, v=11)
+        b = ModelA(key=2, v=22)
 
         t.register_model(a)
         t.register_model(b)
         t.register_model(None)
 
-        assert len(t._model_cache._cache.values()) == 2
+        assert len(t._model_cache._id_cache.values()) == 2
+        assert len(t._model_cache._key_cache.values()) == 2
         assert await t.get(ModelA, 1) == a
         assert await t.get(ModelA, 2) == b
 
     @pytest.mark.asyncio
     async def test_force_register_model(self, t):
-        old_a = ModelA(key=PrimaryKey(int, 1), v=11)
-        old_b = ModelA(key=PrimaryKey(int, 2), v=22)
-        a = ModelA(key=PrimaryKey(int, 1), v=33)
-        b = ModelA(key=PrimaryKey(int, 2), v=44)
+        old_a = ModelA(key=1, v=11)
+        old_b = ModelA(key=2, v=22)
+        a = ModelA(key=1, v=33)
+        b = ModelA(key=2, v=44)
 
         t.register_model(old_a)
         t.register_model(old_b)
@@ -260,7 +262,8 @@ class TestTransaction:
         assert await t.query(query) == []
 
         t.reset()
-        assert t._model_cache._cache == {}
+        assert t._model_cache._id_cache == {}
+        assert t._model_cache._key_cache == {}
         assert t._query_cache._cache == {}
 
         # after reset, the transaction must try to call
@@ -489,7 +492,7 @@ class TestTransaction:
 
         await t.commit()
 
-        models_in_cache = t._model_cache._cache.values()
+        models_in_cache = t._model_cache.get_all_models()
 
         for model in models_in_cache:
             assert model._state == ModelState.CLEAN
@@ -562,7 +565,7 @@ class TestTransaction:
     async def test_commit_exception_interrupt_on_error(self, models_strategy):
         a, b, c, d, e, f, g, h, i, j = models = models_strategy
 
-        processed_when_canceled = set([b, e, g, h])
+        processed_when_canceled = set([b, f, g, h])
         maybe_processed_when_canceled = set([a, e])
         errors_when_canceled = set([d])
         not_processed_when_canceled = set([c, d, i, j])

@@ -2,7 +2,8 @@ from typing import List, Optional
 
 import pytest
 
-from restio.model import BaseModel, PrimaryKey, mdataclass, pk
+from restio.model import (BaseModel, DefaultPrimaryKey, PrimaryKey, mdataclass,
+                          pk)
 
 
 @mdataclass
@@ -170,8 +171,8 @@ class TestModel:
     def test_get_mutable(self, a, b):
         assert set(a._mutable) == set(['id', 'a', 'b'])
         assert set(b._mutable) == set(['ref', 'c'])
-        assert set(a._get_mutable_fields().values()) == set([None, 1, 'a'])
-        assert set(b._get_mutable_fields().values()) == set([None, 'b'])
+        assert set(a._get_mutable_fields().values()) == set([DefaultPrimaryKey, 1, 'a'])
+        assert set(b._get_mutable_fields().values()) == set([DefaultPrimaryKey, 'b'])
 
     def test_copy(self, a, b, c):
         a.id = 1

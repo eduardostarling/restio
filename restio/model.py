@@ -3,32 +3,46 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass, field, is_dataclass
 from typing import (Any, Dict, ForwardRef, Generic, List, Optional, Set, Tuple,
-                    Type, TypeVar, Union, cast, overload)
+                    Type, TypeVar, Union)
 from uuid import UUID, uuid4
 
 from .state import ModelState
 
-T = TypeVar('T', int, str)
+
+class _DefaultPrimaryKey:
+    def __eq__(self, value):
+        if isinstance(value, _DefaultPrimaryKey) or value is None:
+            return True
+        return False
+
+    def __hash__(self):
+        return hash(None)
+
+
+DefaultPrimaryKey = _DefaultPrimaryKey()
+
+
+T = TypeVar('T', int, str, _DefaultPrimaryKey)
 
 
 class PrimaryKey(Generic[T]):
-    value: Optional[T]
+    value: T
     _type: Type[T]
 
-    def __init__(self, key_type: Type[T], value: Optional[T] = None) -> None:
+    def __init__(self, key_type: Type[T], value: T = DefaultPrimaryKey) -> None:
         if key_type not in T.__constraints__:  # type: ignore
             raise TypeError(f"Provided type {key_type.__name__} is not allowed.")
 
         self._type = key_type
         self.set(value)
 
-    def set(self, value: Optional[T]):
-        if value is not None and not issubclass(type(value), self._type):
+    def set(self, value: T):
+        if value is not DefaultPrimaryKey and not issubclass(type(value), self._type):
             raise RuntimeError(f"Primary key value must be of type {self._type.__name__}")
 
         self.value = value
 
-    def get(self) -> Optional[T]:
+    def get(self) -> T:
         return self.value
 
     def __eq__(self, other: object) -> bool:
@@ -49,7 +63,7 @@ def mdataclass(*args, **kwargs):
     return dataclass(*args, **kwargs)
 
 
-def pk(key_type: Type[T], default_value: Optional[T] = None, **kwargs):
+def pk(key_type: Type[T], default_value: T = DefaultPrimaryKey, **kwargs):
     return field(default_factory=lambda: PrimaryKey(key_type, default_value), **kwargs)
 
 
@@ -228,12 +242,8 @@ class BaseModel(Generic[T], metaclass=BaseModelMeta):
 
             try:
                 key_attr = super(BaseModel, self).__getattribute__(name)
-            except AttributeError:
-                key_attr = None
-
-            if key_attr:
                 key_attr.set(value.get())
-            else:
+            except AttributeError:
                 super().__setattr__(name, value)
 
             self._primary_keys = self._get_primary_keys()
@@ -251,7 +261,7 @@ class BaseModel(Generic[T], metaclass=BaseModelMeta):
             if isinstance(key_attr, PrimaryKey):
                 return key_attr.get()
             else:
-                key_attr = PrimaryKey(cls._class_primary_keys[name], None)
+                key_attr = PrimaryKey(cls._class_primary_keys[name], DefaultPrimaryKey)
                 super().__setattr__(name, key_attr)
                 return key_attr.get()
         else:
