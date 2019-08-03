@@ -4,7 +4,7 @@ from typing import List, Optional, Tuple
 import requests
 
 from restio.dao import BaseDAO
-from restio.model import BaseModel, PrimaryKey, ValueKey, mdataclass, pk
+from restio.model import BaseModel, PrimaryKey, mdataclass, pk
 from restio.query import query
 from restio.transaction import Transaction
 
@@ -46,7 +46,7 @@ class Employee(BaseModel):
 class EmployeeDAO(BaseDAO):
     client = ClientAPI()
 
-    async def get(self, obj: Tuple[ValueKey[int]]) -> Employee:
+    async def get(self, obj: Tuple[int]) -> Employee:
         json = self.client.get_employee(obj[0])
         return self._get_model(json)
 
