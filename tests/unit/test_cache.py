@@ -14,15 +14,15 @@ class Model(BaseModel):
 
 @query
 async def SimpleQuery(self) -> List[Model]:
-    m1 = Model(id=PrimaryKey(int, 1))
-    m2 = Model(id=PrimaryKey(int, 2))
+    m1 = Model(id=1)
+    m2 = Model(id=2)
     return [m1, m2]
 
 
 @query
 async def ArgsQuery(self, arg1: int, arg2: int = 2) -> List[BaseModel]:
-    m1 = Model(id=PrimaryKey(int, arg1))
-    m2 = Model(id=PrimaryKey(int, arg2))
+    m1 = Model(id=arg1)
+    m2 = Model(id=arg2)
     return [m1, m2]
 
 
@@ -36,7 +36,8 @@ class TestModelCache:
         return ModelCache()
 
     def test_init(self, cache):
-        assert cache._cache == {}
+        assert cache._id_cache == {}
+        assert cache._key_cache == {}
 
     def test_register_unique_internal_id(self, cache):
         # Checks if model does not exist in cache
@@ -87,19 +88,8 @@ class TestModelCache:
         with pytest.raises(ValueError):
             cache.unregister(m4)
 
-        assert len(cache._cache.values()) == 1
-
-    def test_get_type(self, cache):
-
-        assert len(cache.get_type(Model)) == 0
-        self.test_register_unique_internal_id(cache)
-        assert len(cache.get_type(Model)) == 1
-
-        cache = ModelCache()
-
-        assert len(cache.get_type(Model)) == 0
-        self.test_register_unique_primary_key(cache)
-        assert len(cache.get_type(Model)) == 1
+        assert len(cache._id_cache.values()) == 1
+        assert len(cache._key_cache.values()) == 1
 
     def test_get_by_internal_id(self, cache):
         self.test_register_unique_internal_id(cache)
@@ -112,21 +102,18 @@ class TestModelCache:
     def test_get(self, cache):
         self.test_register_unique_primary_key(cache)
         # Checks if model now exists in cache
-        assert cache.get(Model, (1,)) is not None
+        assert cache.get_by_primary_key(Model, (1,)) is not None
         # Checks if another type does not exist in cache
-        assert cache.get(BaseModel, (1,)) is None
+        assert cache.get_by_primary_key(BaseModel, (1,)) is None
 
-    def test_get_key(self, cache):
+    def test_get_by_primary_key(self, cache):
         m = Model()
         m.id = 1
 
         cache.register(m)
         first_ref = cache.get_by_internal_id(Model, m._internal_id)
-        second_ref = cache.get(Model, m.id)
-        third_ref = cache.get(Model, [m.id])
 
-        assert first_ref == second_ref
-        assert second_ref == third_ref
+        assert first_ref == m
 
 
 class TestQueryCache:

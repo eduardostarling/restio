@@ -1,5 +1,5 @@
-from typing import Type, Tuple, Optional
 from functools import wraps
+from typing import Optional, Tuple, Type
 
 from .model import BaseModel, ValueKey
 

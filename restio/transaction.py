@@ -1,16 +1,18 @@
-from typing import Type, Tuple, Set, List, Dict, Optional, Any, Deque, overload, cast
+import asyncio
+from collections import deque
 from copy import deepcopy
 from enum import Enum
-from collections import deque
-import asyncio
+from typing import (Any, Deque, Dict, List, Optional, Set, Tuple, Type, cast,
+                    overload)
 
 from .cache import ModelCache, QueryCache
-from .model import BaseModel, ValueKey
-from .state import Transition, ModelState, ModelStateMachine
-from .query import BaseQuery
 from .dao import BaseDAO
-from .graph import DependencyGraph, TreeProcessException, Tree, NodeProcessException, Node, \
-    NavigationDirection, CallbackCoroutineCallable
+from .graph import (CallbackCoroutineCallable, DependencyGraph,
+                    NavigationDirection, Node, NodeProcessException, Tree,
+                    TreeProcessException)
+from .model import BaseModel, ValueKey
+from .query import BaseQuery
+from .state import ModelState, ModelStateMachine, Transition
 
 
 class TransactionOperationError(Exception):
@@ -125,10 +127,9 @@ class Transaction:
         if not isinstance(value, tuple):
             value = (value,)
 
-        model: BaseModel = self._model_cache.get(model_type, value)
-
+        model: BaseModel = self._model_cache.get_by_primary_key(model_type, value)
         if model:
-            return model
+            return model.copy()
 
         dao: BaseDAO = self.get_dao(model_type)
         if not dao:
@@ -138,8 +139,9 @@ class Transaction:
         if model:
             model._state = ModelStateMachine.transition(Transition.EXISTING_OBJECT, None)
             self.register_model(model, force=True)
+            return model.copy()
 
-        return model
+        return None
 
     def add(self, model: BaseModel) -> bool:
         assert model is not None
@@ -150,7 +152,7 @@ class Transaction:
 
         keys = model.get_keys()
         if keys:
-            model_cache = self._model_cache.get(model.__class__, keys)
+            model_cache = self._model_cache.get_by_primary_key(model.__class__, keys)
             if model_cache:
                 raise RuntimeError(f"Model with keys `{keys}` is already registered in" " internal cache.")
 
@@ -214,11 +216,11 @@ class Transaction:
         return self._get_models_by_state(ModelState.DELETED, models)
 
     def get_transaction_models(self, models: Optional[Set[BaseModel]] = None) -> Set[BaseModel]:
-        models = set(self._model_cache._cache.values()) if not models else models
+        models = set(self._model_cache._id_cache.values()) if not models else models
         return set([model for model in models if model._state not in (ModelState.CLEAN, ModelState.DISCARDED)])
 
     def _check_deleted_models(self, models: Optional[Set[BaseModel]] = None):
-        models = set(self._model_cache._cache.values()) if not models else models
+        models = set(self._model_cache._id_cache.values()) if not models else models
         nodes = DependencyGraph._get_connected_nodes(models)
         for node in (n for n in nodes if n.node_object._state == ModelState.DELETED):
             for parent_node in node.get_parents(recursive=True):
