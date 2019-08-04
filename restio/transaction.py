@@ -96,13 +96,11 @@ class Transaction:
         if not model:
             return
 
-        model = model.copy()
         self._register_model(model, force, register_children)
 
     def register_query(
         self, query: BaseQuery, models: List[BaseModel], force: bool = False, register_children: bool = True
     ):
-        models = deepcopy(models)
         self._query_cache.register(query, models)
 
         for model in models:

@@ -367,7 +367,7 @@ class TestTransaction:
         a, _, _ = models
         old_a_value = a.v
 
-        t.register_model(a)
+        t.register_model(a.copy())
         cached_a = await t.get(ModelA, 1)
 
         assert cached_a == a
@@ -388,7 +388,7 @@ class TestTransaction:
         old_a_value = a.v
         old_a_string = a.s
 
-        t.register_model(a)
+        t.register_model(a.copy())
 
         a.v = 100
         t.update(a)
@@ -639,9 +639,9 @@ class TestTransaction:
     async def test_rollback(self, t, models_complex):
         a, b, c, d, e, f = models = list(models_complex)
 
-        t.register_model(a)
-        t.register_model(d)
-        t.register_model(f)
+        t.register_model(a.copy())
+        t.register_model(d.copy())
+        t.register_model(f.copy())
         t.add(b)
         t.add(c)
         t.add(e)
