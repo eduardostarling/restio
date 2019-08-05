@@ -132,7 +132,6 @@ class BaseModel(Generic[T], metaclass=BaseModelMeta):
     _immutable: Set[str] = field(repr=False, init=False, compare=False, hash=False)
 
     def __post_init__(self):
-        #self._primary_keys = self._get_primary_keys()
         self._typed_fields = self.__class__._class_typed_fields
         self._mutable = self.__class__._class_mutable
         self._immutable = self.__class__._class_immutable
