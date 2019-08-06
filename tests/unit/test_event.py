@@ -1,10 +1,11 @@
-
 import pytest
 
 from restio.event import EventListener
 
 
 class DummyObject:
+    called = False
+
     def __init__(self, value):
         self.value = value
         self.calls = 0
@@ -12,6 +13,9 @@ class DummyObject:
     async def method(self):
         self.calls += 1
         return self.value
+
+    async def ghost_method(self):
+        DummyObject.called = True
 
 
 class TestEventListener:
@@ -92,6 +96,7 @@ class TestEventListener:
         def syncfunc():
             obj.calls += 1
         event2 = "mysecondevent"
+        event3 = "mythirdevent"
 
         listener.subscribe(event, obj.method)
         listener.subscribe(event, asyncfunc)
@@ -101,3 +106,13 @@ class TestEventListener:
         assert obj.calls == 3
         await listener.dispatch(event2)
         assert obj.calls == 4
+        await listener.dispatch(event3)
+        assert obj.calls == 4
+
+    @pytest.mark.asyncio
+    async def test_dispatch_deleted(self, listener, event):
+        obj = DummyObject("val")
+        listener.subscribe(event, obj.ghost_method)
+        del obj
+        await listener.dispatch(event)
+        assert not DummyObject.called
