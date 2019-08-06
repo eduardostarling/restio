@@ -559,7 +559,7 @@ class TestTransaction:
         assert expected_processed.intersection(processed_models) == expected_processed
         assert maybe_processed == expected_processed_or_pending
         assert expected_errors == error_models
-        assert expected_not_processed == pending_models
+        assert expected_not_processed == (pending_models - maybe_processed)
 
     @pytest.mark.asyncio
     async def test_commit_exception_interrupt_on_error(self, models_strategy):
