@@ -71,6 +71,22 @@ class TestEventListener:
         listener.unsubscribe(event, asyncfunc)
         assert not listener._listener[event]
 
+    def test_subscribe_invalid(self, listener, event, obj):
+        with pytest.raises(ValueError):
+            listener.subscribe("", obj.method)
+        with pytest.raises(TypeError):
+            listener.subscribe(event, "var")
+        with pytest.raises(TypeError):
+            listener.subscribe(event, obj)
+
+    def test_unsubscribe_invalid(self, listener, event, obj):
+        listener.subscribe(event, obj.method)
+        assert len(listener._listener) == 1
+        assert len(listener._listener[event]) == 1
+        listener.unsubscribe(f"{event}X", obj.method)
+        assert len(listener._listener) == 1
+        assert len(listener._listener[event]) == 1
+
     @pytest.mark.asyncio
     async def test_dispatch(self, listener, value, event, asyncfunc, obj):
         def syncfunc():

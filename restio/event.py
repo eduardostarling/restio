@@ -13,6 +13,9 @@ class EventListener:
         self._listener = {}
 
     def subscribe(self, event: str, method: Callable[..., Any]):
+        if not event:
+            raise ValueError("You must specify a valid event name.")
+
         weak_method = self._reference_method(method)
         self._listener.setdefault(event, set())
         self._listener[event].add(weak_method)
@@ -33,7 +36,6 @@ class EventListener:
 
     async def dispatch(self, event: str):
         tasks = []
-        loop = asyncio.get_event_loop()
         if event in self._listener:
             for weak_method in self._listener[event]:
                 method = self._resolve_reference(weak_method)
@@ -41,12 +43,12 @@ class EventListener:
                     continue
 
                 if asyncio.iscoroutinefunction(method):
-                    tasks.append(loop.create_task(method()))
+                    tasks.append(asyncio.create_task(method()))
                 else:
                     method()
 
         if tasks:
-            await asyncio.wait(tasks, loop=loop)
+            await asyncio.wait(tasks)
 
     def _resolve_reference(self, reference: ListeningMethod) -> Optional[Callable[..., Any]]:
         if isinstance(reference, weakref.WeakMethod):
