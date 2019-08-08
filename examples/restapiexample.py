@@ -1,4 +1,7 @@
 import asyncio
+import json
+import random
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional, Tuple
 
 import requests
@@ -25,6 +28,10 @@ class ClientAPI:
         response = requests.get(self.get_url(f"employees"), headers=self.headers)
         return self._process_response(response)
 
+    def update_employee(self, employee_id: int, employee):
+        response = requests.put(self.get_url(f"update/{employee_id}"), employee, headers=self.headers)
+        return response.ok
+
     def _process_response(self, response):
         if response.ok:
             return response.json()
@@ -45,10 +52,24 @@ class Employee(BaseModel):
 
 class EmployeeDAO(BaseDAO):
     client = ClientAPI()
+    pool = ThreadPoolExecutor()
 
     async def get(self, obj: Tuple[int]) -> Employee:
-        json = self.client.get_employee(obj[0])
+        loop = asyncio.get_event_loop()
+        json = await loop.run_in_executor(self.pool, self.client.get_employee, obj[0])
         return self._get_model(json)
+
+    async def update(self, model: Employee):
+        model_dict = {'name': model.name, 'salary': model.salary, 'age': model.age}
+        model_json = json.dumps(model_dict)
+
+        ok = await loop.run_in_executor(
+            None, self.client.update_employee, model.id, model_json)
+
+        if not ok:
+            raise Exception(f"Error while modifying employee {model.id}.")
+
+        return model
 
     def _get_model(self, json):
         return Employee(
@@ -59,7 +80,7 @@ class EmployeeDAO(BaseDAO):
 @query
 async def get_employees(self, dao: EmployeeDAO) -> List[Employee]:
     employees = dao.client.get_employees()
-    return [dao._get_model(x) for x in employees[:10]]
+    return [dao._get_model(x) for x in employees]
 
 
 async def main():
@@ -71,6 +92,7 @@ async def main():
 
     # loads a list of employees from the remote server
     # using a query function
+
     q = get_employees(dao)
     employees: List[Employee] = await t.query(q)
 
@@ -88,10 +110,29 @@ async def main():
     # first call will make the request, while the rest
     # will be ignored
     employee: Optional[Employee]
-    for _ in range(0, 100):
-        employee = await t.get(Employee, employee_id)
+    tasks = []
+    for _ in range(0, 2):
+        tasks.append(t.get(Employee, employee_id))
 
-    print("Manually loaded employee: ", employee)
+    for coro in asyncio.as_completed(tasks):
+        employee = await coro  # grabs the loaded employee
+        print("Manually loaded employee: ", employee)
+
+    # makes a change to be reflected on the server
+    employee.name = "MyAwesomeName" + str(random.randint(10000, 99999))
+
+    # submits the change to the remote server
+    await t.commit()
+    print("Employee modified: ", employee)
+
+    # resets the local cache
+    t.reset()
+
+    # reloads the employee from the remote server to verify
+    # that the change was effective
+    employee = await t.get(Employee, employee_id)
+    print("Manually reloaded employee: ", employee)
+
 
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
