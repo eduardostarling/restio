@@ -302,6 +302,25 @@ class TestTransaction:
         assert c._state == ModelState.CLEAN
 
     @pytest.mark.asyncio
+    async def test_get_new_concurrent(self, t):
+        class ModelDAO(BaseDAO):
+            a = None
+
+            async def get(self, obj):
+                await asyncio.sleep(randint(1, 2) / 10000)
+                model = ModelA(key=1)
+                if not ModelDAO.a:
+                    ModelDAO.a = model
+                return model
+
+        t.register_dao(ModelDAO(ModelA))
+
+        tasks = [t.get(ModelA, 1) for _ in range(5)]
+        for task in asyncio.as_completed(tasks):
+            result = await task
+            assert result._internal_id == ModelDAO.a._internal_id
+
+    @pytest.mark.asyncio
     async def test_get_invalid_dao(self, t):
         with pytest.raises(RuntimeError):
             await t.get(ModelA, 1)
