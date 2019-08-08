@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass, field, is_dataclass
-from typing import (Any, Dict, ForwardRef, Generic, List, Optional, Set, Tuple,
-                    Type, TypeVar, Union)
+from typing import (Any, ClassVar, Dict, ForwardRef, Generic, List, Optional,
+                    Set, Tuple, Type, TypeVar, Union)
 from uuid import UUID, uuid4
 
+from .event import EventListener
 from .state import ModelState
 
 
@@ -68,8 +68,11 @@ def pk(key_type: Type[T], default_value: T = DefaultPrimaryKey, **kwargs):
 
 
 class BaseModelMeta(type):
+    _class_mutable: Set[str]
+    _class_immutable: Set[str]
+
     def __new__(cls, name, bases, dct):
-        x = super().__new__(cls, name, bases, dct)
+        x: BaseModel = super().__new__(cls, name, bases, dct)
 
         if name == 'BaseModel' or is_dataclass(x):
             x._class_primary_keys = {}
@@ -121,34 +124,37 @@ class BaseModelMeta(type):
         return field_type.__args__[0]
 
 
+MODEL_UPDATE_EVENT = "__updated__"
+
+
 @mdataclass
 class BaseModel(Generic[T], metaclass=BaseModelMeta):
+    _class_primary_keys: ClassVar[Dict[str, type]]
+    _class_typed_fields: ClassVar[Dict[str, type]]
+    _class_mutable: ClassVar[Set[str]]
+    _class_immutable: ClassVar[Set[str]]
+
     _internal_id: UUID = field(default_factory=uuid4)
     _state: ModelState = field(init=False, repr=False, compare=False, hash=False, default=ModelState.CLEAN)
     _persistent_values: Dict[str, Any] = field(init=False, repr=False, compare=False, hash=False, default_factory=dict)
     _primary_keys: Tuple[Optional[T], ...] = field(repr=False, init=False, compare=False, hash=False)
-    _typed_fields: Dict[str, type] = field(repr=False, init=False, compare=False, hash=False)
-    _mutable: Set[str] = field(repr=False, init=False, compare=False, hash=False)
-    _immutable: Set[str] = field(repr=False, init=False, compare=False, hash=False)
+    _listener: EventListener = field(repr=False, init=False, compare=False, hash=False, default_factory=EventListener)
+    _initialized: bool = field(repr=False, init=False, compare=False, hash=False, default=False)
 
     def __post_init__(self):
-        self._typed_fields = self.__class__._class_typed_fields
-        self._mutable = self.__class__._class_mutable
-        self._immutable = self.__class__._class_immutable
+        self._initialized = True
+        self._primary_keys = self._get_primary_keys()
 
     def _get_primary_keys(self) -> Tuple[Optional[T], ...]:
         return tuple([
             getattr(self, key)
-            for key in self.__class__._class_primary_keys])
+            for key in self._class_primary_keys])
 
     def get_keys(self) -> Tuple[Optional[T], ...]:
         return self._primary_keys
 
-    def copy(self) -> BaseModel:  # noqa: F821
-        return deepcopy(self)
-
     def _get_mutable_fields(self) -> Dict[str, Any]:
-        return {k: getattr(self, k) for k in self._mutable}
+        return {k: getattr(self, k) for k in self._class_mutable}
 
     def get_children(
         self, recursive: bool = False, children: List[BaseModel] = None, top_level: Optional[BaseModel] = None
@@ -183,25 +189,8 @@ class BaseModel(Generic[T], metaclass=BaseModelMeta):
 
         return children
 
-    def _get_modified_values(self, model: 'BaseModel') -> Dict[str, Any]:
-        if model != self:
-            return {}
-
-        return {
-            attr: getattr(model, attr)
-            for attr, value in self._get_mutable_fields().items() if value != getattr(model, attr)
-        }
-
-    def _get_persistent_model(self):
-        model = self.copy()
-
-        for attr, value in self._persistent_values.items():
-            setattr(model, attr, value)
-
-        return model
-
     def _rollback(self):
-        for attr, value in self._persistent_values.items():
+        for attr, value in list(self._persistent_values.items()):
             setattr(self, attr, value)
 
         self._persistent_values = {}
@@ -209,21 +198,19 @@ class BaseModel(Generic[T], metaclass=BaseModelMeta):
     def _persist(self):
         self._persistent_values = {}
 
-    def _update(self, model: BaseModel) -> bool:
-        persistent_model = self._get_persistent_model()
-        modified_values = persistent_model._get_modified_values(model)
+    def _update(self, name, value):
+        if not self._initialized:
+            return
 
-        self._persistent_values = {}
+        if name in self._persistent_values:
+            if value == self._persistent_values[name]:
+                del self._persistent_values[name]
+        else:
+            mutable_fields = self._get_mutable_fields()
+            if value != mutable_fields[name]:
+                self._persistent_values[name] = mutable_fields[name]
 
-        for attr in self._get_mutable_fields():
-            persistent_value = getattr(persistent_model, attr)
-            if attr in modified_values:
-                setattr(self, attr, modified_values[attr])
-                self._persistent_values[attr] = persistent_value
-            else:
-                setattr(self, attr, persistent_value)
-
-        return bool(modified_values)
+        self._listener.dispatch(MODEL_UPDATE_EVENT, self)
 
     def __eq__(self, other):
         if other and isinstance(other, type(self)):
@@ -235,33 +222,34 @@ class BaseModel(Generic[T], metaclass=BaseModelMeta):
         return hash(str(self._internal_id))
 
     def __setattr__(self, name, value):
-        if name in self.__class__._class_primary_keys:
+        if name in self._class_primary_keys:
             if not isinstance(value, PrimaryKey):
-                value = PrimaryKey(type(value), value)
+                key_type = self._class_primary_keys[name]
+                value = PrimaryKey(key_type, value)
 
-            try:
-                key_attr = super(BaseModel, self).__getattribute__(name)
-                key_attr.set(value.get())
-            except AttributeError:
-                super().__setattr__(name, value)
+            self._update(name, value)
+            super().__setattr__(name, value)
 
-            self._primary_keys = self._get_primary_keys()
+            if self._initialized:
+                self._primary_keys = self._get_primary_keys()
+
+        elif name in self._class_mutable:
+            self._update(name, value)
+            super().__setattr__(name, value)
         else:
             super().__setattr__(name, value)
 
     def __getattribute__(self, name):
-        cls = object.__getattribute__(self, '__class__')
-        if name in cls._class_primary_keys:
-            try:
-                key_attr = super().__getattribute__(name)
-            except AttributeError:
-                key_attr = None
+        initialized = object.__getattribute__(self, '_initialized')
 
-            if isinstance(key_attr, PrimaryKey):
-                return key_attr.get()
-            else:
-                key_attr = PrimaryKey(cls._class_primary_keys[name], DefaultPrimaryKey)
-                super().__setattr__(name, key_attr)
-                return key_attr.get()
-        else:
-            return super().__getattribute__(name)
+        if initialized:
+            cls = object.__getattribute__(self, '__class__')
+            if name in cls._class_primary_keys:
+                key_attr = super().__getattribute__(name)
+
+                if isinstance(key_attr, PrimaryKey):
+                    return key_attr.get()
+                else:
+                    return key_attr
+
+        return super().__getattribute__(name)

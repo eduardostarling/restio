@@ -1,7 +1,7 @@
 import asyncio
 from collections import deque
-from copy import deepcopy
 from enum import Enum
+from functools import wraps
 from typing import (Any, Deque, Dict, List, Optional, Set, Tuple, Type, cast,
                     overload)
 
@@ -10,7 +10,7 @@ from .dao import BaseDAO
 from .graph import (CallbackCoroutineCallable, DependencyGraph,
                     NavigationDirection, Node, NodeProcessException, Tree,
                     TreeProcessException)
-from .model import BaseModel, ValueKey
+from .model import MODEL_UPDATE_EVENT, BaseModel, ValueKey
 from .query import BaseQuery
 from .state import ModelState, ModelStateMachine, Transition
 
@@ -51,21 +51,48 @@ class PersistencyStrategy(Enum):
     CONTINUE_ON_ERROR = 1
 
 
+class TransactionState(Enum):
+    STANDBY = 0
+    GET = 1
+    COMMIT = 2
+    ROLLBACK = 3
+
+
+def transactionstate(state: TransactionState):
+    def deco(func):
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            previous = self._state
+            self._state = state
+
+            result = func(self, *args, **kwargs)
+
+            self._state = previous
+            return result
+        return wrapper
+    return deco
+
+
 class Transaction:
     _model_cache: ModelCache
     _query_cache: QueryCache
     _daos: Dict[Type[BaseModel], BaseDAO]
     _strategy: PersistencyStrategy
+    _state: TransactionState
+    _model_lock: Dict[str, asyncio.Lock]
 
     def __init__(self, strategy=PersistencyStrategy.INTERRUPT_ON_ERROR):
         self._model_cache = ModelCache()
         self._query_cache = QueryCache()
         self._daos = {}
         self._strategy = strategy
+        self._state = TransactionState.STANDBY
+        self._model_lock = {}
 
     def reset(self):
         self._model_cache.reset()
         self._query_cache.reset()
+        self._model_lock = {}
 
     def register_dao(self, dao: BaseDAO):
         model_type = dao._model_type
@@ -78,11 +105,13 @@ class Transaction:
 
     def _register_model(self, model: BaseModel, force: bool = False, register_children: bool = True):
         self._model_cache.register(model, force)
+        self._subscribe_update(model)
 
         children = model.get_children(recursive=True)
         if register_children:
             for child in children:
                 self._model_cache.register(child, force)
+                self._subscribe_update(child)
         elif children:
             for child in children:
                 if not self._model_cache.get_by_internal_id(child.__class__, child._internal_id):
@@ -91,6 +120,12 @@ class Transaction:
                         f"is a child of `{model._internal_id}` ({model.__class__.__name__})"
                         " and is not registered in cache."
                     )
+
+    def _subscribe_update(self, model: BaseModel):
+        model._listener.subscribe(MODEL_UPDATE_EVENT, self._update)
+
+    def _unsubscribe_update(self, model: BaseModel):
+        model._listener.unsubscribe(MODEL_UPDATE_EVENT, self._update)
 
     def register_model(self, model: BaseModel, force: bool = False, register_children: bool = True):
         if not model:
@@ -118,6 +153,7 @@ class Transaction:
     async def get(self, model_type: Type[BaseModel], value: ValueKey) -> Optional[BaseModel]:
         ...
 
+    @transactionstate(TransactionState.GET)
     async def get(self, model_type, value):
         if isinstance(value, list):
             value = tuple(value)
@@ -125,21 +161,29 @@ class Transaction:
         if not isinstance(value, tuple):
             value = (value,)
 
-        model: BaseModel = self._model_cache.get_by_primary_key(model_type, value)
-        if model:
-            return model.copy()
+        model_lock = self._get_model_lock(model_type, value)
 
-        dao: BaseDAO = self.get_dao(model_type)
-        if not dao:
-            raise RuntimeError(f"DAO for model type {model_type.__name__} not found for this transaction.")
+        async with model_lock:
+            model: BaseModel = self._model_cache.get_by_primary_key(model_type, value)
+            if model:
+                return model
 
-        model = cast(model_type, await dao.get(value))
-        if model:
-            model._state = ModelStateMachine.transition(Transition.EXISTING_OBJECT, None)
-            self.register_model(model, force=True)
-            return model.copy()
+            dao: BaseDAO = self.get_dao(model_type)
+            if not dao:
+                raise RuntimeError(f"DAO for model type {model_type.__name__} not found for this transaction.")
+
+            model = cast(model_type, await dao.get(value))
+            if model:
+                model._state = ModelStateMachine.transition(Transition.EXISTING_OBJECT, None)
+                self.register_model(model, force=True)
+                return model
 
         return None
+
+    def _get_model_lock(self, model_type: Type[BaseModel], value: Tuple[ValueKey, ...]) -> asyncio.Lock:
+        lock_hash = f"{model_type.__name__}/{str(value)}"
+        self._model_lock.setdefault(lock_hash, asyncio.Lock())
+        return self._model_lock[lock_hash]
 
     def add(self, model: BaseModel) -> bool:
         assert model is not None
@@ -154,11 +198,10 @@ class Transaction:
             if model_cache:
                 raise RuntimeError(f"Model with keys `{keys}` is already registered in" " internal cache.")
 
-        model_copy = model.copy()
-        model_copy._state = ModelStateMachine.transition(Transition.ADD_OBJECT, None)
-        self._register_model(model_copy, force=False, register_children=False)
+        model._state = ModelStateMachine.transition(Transition.ADD_OBJECT, None)
+        self._register_model(model, force=False, register_children=False)
 
-        return model_copy._state == ModelState.NEW
+        return model._state == ModelState.NEW
 
     def _assert_cache_internal_id(self, model: BaseModel) -> BaseModel:
         assert model is not None
@@ -175,19 +218,25 @@ class Transaction:
 
         return model_cache._state == ModelState.DELETED
 
-    def update(self, model: BaseModel) -> bool:
-        model_cache = self._assert_cache_internal_id(model)
+    def _update(self, model: BaseModel) -> bool:
+        # During COMMIT, ROLLBACK and GET, all changes to models
+        # should be permanent, therefore we persist any change
+        # and avoid changing the state of the models
+        if self._state in (TransactionState.COMMIT, TransactionState.ROLLBACK, TransactionState.GET):
+            model._persist()
+            return False
+
         updated = False
 
-        new_state = ModelStateMachine.transition(Transition.UPDATE_OBJECT, model_cache._state)
+        new_state = ModelStateMachine.transition(Transition.UPDATE_OBJECT, model._state)
         if new_state in (ModelState.DIRTY, ModelState.NEW):
-            updated = model_cache._update(model)
+            updated = bool(model._persistent_values)
             if not updated and new_state == ModelState.DIRTY:
-                new_state = ModelStateMachine.transition(Transition.CLEAN_OBJECT, model_cache._state)
+                new_state = ModelStateMachine.transition(Transition.CLEAN_OBJECT, model._state)
             elif new_state == ModelState.NEW:
-                model_cache._persist()
+                model._persist()
 
-        model_cache._state = new_state
+        model._state = new_state
         return updated
 
     async def query(self, query: BaseQuery, force: bool = False) -> List[BaseModel]:
@@ -229,6 +278,7 @@ class Transaction:
                         "other models cannot be deleted."
                     )
 
+    @transactionstate(TransactionState.COMMIT)
     async def commit(self):
         cached_values = self._model_cache.get_all_models()
 
@@ -271,6 +321,7 @@ class Transaction:
             discarded_models: Set[BaseModel] = set(filter(lambda m: m._state == ModelState.DISCARDED, all_models))
             for model in discarded_models:
                 self._model_cache.unregister(model)
+                self._unsubscribe_update(model)
 
     async def _process_all_graphs(self, graphs: List[DependencyGraph], directions: List[NavigationDirection]):
         all_processed_models: Deque[BaseModel] = deque()
@@ -386,10 +437,12 @@ class Transaction:
 
         return callables
 
+    @transactionstate(TransactionState.ROLLBACK)
     def rollback(self):
         for model in self._model_cache.get_all_models():
             model._state = ModelStateMachine.transition(Transition.ROLLBACK_OBJECT, model._state)
             if model._state == ModelState.DISCARDED:
                 self._model_cache.unregister(model)
+                self._unsubscribe_update(model)
             else:
                 model._rollback()
