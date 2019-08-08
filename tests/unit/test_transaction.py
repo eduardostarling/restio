@@ -346,16 +346,10 @@ class TestTransaction:
     @pytest.mark.asyncio
     async def test_add(self, t, models):
         a, _, _ = models
-        a_copy = a.copy()
-        a_copy._internal_id = uuid4()
 
         assert t.add(a)
-
         with pytest.raises(RuntimeError):
             t.add(a)
-
-        with pytest.raises(RuntimeError):
-            t.add(a_copy)
 
         cached_a = await t.get(ModelA, 1)
 
@@ -367,15 +361,13 @@ class TestTransaction:
         a, _, _ = models
         old_a_value = a.v
 
-        t.register_model(a.copy())
+        t.register_model(a)
         cached_a = await t.get(ModelA, 1)
 
         assert cached_a == a
         assert cached_a._state == ModelState.CLEAN
 
         a.v = 100
-        t.update(a)
-
         cached_a = await t.get(ModelA, 1)
 
         assert cached_a._state == ModelState.DIRTY
@@ -388,14 +380,11 @@ class TestTransaction:
         old_a_value = a.v
         old_a_string = a.s
 
-        t.register_model(a.copy())
+        t.register_model(a)
 
         a.v = 100
-        t.update(a)
-
         a.v = old_a_value
         a.s = "string"
-        t.update(a)
 
         cached_a = await t.get(ModelA, 1)
 
@@ -414,12 +403,8 @@ class TestTransaction:
 
         a.v = 100
         a.s = "string"
-        t.update(a)
-
         a.v = old_a_value
         a.s = old_a_string
-
-        t.update(a)
 
         cached_a = await t.get(ModelA, 1)
 
@@ -439,8 +424,6 @@ class TestTransaction:
         assert cached_a._state == ModelState.NEW
 
         a.v = 100
-        t.update(a)
-
         cached_a = await t.get(ModelA, 1)
 
         assert cached_a._state == ModelState.NEW
@@ -639,16 +622,15 @@ class TestTransaction:
     async def test_rollback(self, t, models_complex):
         a, b, c, d, e, f = models = list(models_complex)
 
-        t.register_model(a.copy())
-        t.register_model(d.copy())
-        t.register_model(f.copy())
+        t.register_model(a)
+        t.register_model(d)
+        t.register_model(f)
         t.add(b)
         t.add(c)
         t.add(e)
         t.remove(f)
 
         d.v = 444
-        t.update(d)
 
         a_cache, b_cache, c_cache, d_cache, e_cache, f_cache = \
             [await t.get(m.__class__, m.get_keys()) for m in models]

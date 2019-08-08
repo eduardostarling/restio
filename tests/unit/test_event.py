@@ -10,11 +10,11 @@ class DummyObject:
         self.value = value
         self.calls = 0
 
-    async def method(self):
+    def method(self):
         self.calls += 1
         return self.value
 
-    async def ghost_method(self):
+    def ghost_method(self):
         DummyObject.called = True
 
 
@@ -37,13 +37,13 @@ class TestEventListener:
         return DummyObject(value)
 
     @pytest.fixture
-    def asyncfunc(self, value, obj):
-        async def asyncfunc():
-            return await obj.method()
-        return asyncfunc
+    def syncfunc(self, obj, value):
+        def func():
+            obj.calls += 1
+            return value
+        return func
 
-    @pytest.mark.asyncio
-    async def test_subscribe_method(self, listener, event, value, obj):
+    def test_subscribe_method(self, listener, event, value, obj):
         listener.subscribe(event, obj.method)
 
         assert event in listener._listener
@@ -52,27 +52,26 @@ class TestEventListener:
         method = weak_method()
         assert obj.method == method
         assert method is not None
-        assert await method() == value
+        assert method() == value
         assert obj.calls == 1
 
-    @pytest.mark.asyncio
-    async def test_subscribe_function(self, listener, value, event, obj, asyncfunc):
-        listener.subscribe(event, asyncfunc)
+    def test_subscribe_function(self, listener, value, event, obj, syncfunc):
+        listener.subscribe(event, syncfunc)
 
         assert event in listener._listener
 
         method = listener._listener[event].pop()
-        assert asyncfunc == method
-        assert await method() == value
+        assert syncfunc == method
+        assert method() == value
         assert obj.calls == 1
 
-    def test_unsubscribe(self, listener, value, event, asyncfunc, obj):
+    def test_unsubscribe(self, listener, value, event, syncfunc, obj):
         listener.subscribe(event, obj.method)
-        listener.subscribe(event, asyncfunc)
+        listener.subscribe(event, syncfunc)
         assert len(listener._listener[event]) == 2
         listener.unsubscribe(event, obj.method)
         assert len(listener._listener[event]) == 1
-        listener.unsubscribe(event, asyncfunc)
+        listener.unsubscribe(event, syncfunc)
         assert not listener._listener[event]
 
     def test_subscribe_invalid(self, listener, event, obj):
@@ -91,28 +90,23 @@ class TestEventListener:
         assert len(listener._listener) == 1
         assert len(listener._listener[event]) == 1
 
-    @pytest.mark.asyncio
-    async def test_dispatch(self, listener, value, event, asyncfunc, obj):
-        def syncfunc():
-            obj.calls += 1
+    def test_dispatch(self, listener, value, event, syncfunc, obj):
         event2 = "mysecondevent"
         event3 = "mythirdevent"
 
         listener.subscribe(event, obj.method)
-        listener.subscribe(event, asyncfunc)
         listener.subscribe(event, syncfunc)
         listener.subscribe(event2, syncfunc)
-        await listener.dispatch(event)
+        listener.dispatch(event)
+        assert obj.calls == 2
+        listener.dispatch(event2)
         assert obj.calls == 3
-        await listener.dispatch(event2)
-        assert obj.calls == 4
-        await listener.dispatch(event3)
-        assert obj.calls == 4
+        listener.dispatch(event3)
+        assert obj.calls == 3
 
-    @pytest.mark.asyncio
-    async def test_dispatch_deleted(self, listener, event):
+    def test_dispatch_deleted(self, listener, event):
         obj = DummyObject("val")
         listener.subscribe(event, obj.ghost_method)
         del obj
-        await listener.dispatch(event)
+        listener.dispatch(event)
         assert not DummyObject.called

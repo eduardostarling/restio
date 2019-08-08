@@ -1,4 +1,3 @@
-import asyncio
 import types
 import weakref
 from typing import Any, Callable, Dict, Optional, Set, Union
@@ -34,21 +33,14 @@ class EventListener:
             raise TypeError(
                 "The parameter `method` must be either a method or a function")
 
-    async def dispatch(self, event: str):
-        tasks = []
+    def dispatch(self, event: str, *args, **kwargs):
         if event in self._listener:
             for weak_method in self._listener[event]:
                 method = self._resolve_reference(weak_method)
                 if not method:
                     continue
 
-                if asyncio.iscoroutinefunction(method):
-                    tasks.append(asyncio.create_task(method()))
-                else:
-                    method()
-
-        if tasks:
-            await asyncio.wait(tasks)
+                method(*args, **kwargs)
 
     def _resolve_reference(self, reference: ListeningMethod) -> Optional[Callable[..., Any]]:
         if isinstance(reference, weakref.WeakMethod):

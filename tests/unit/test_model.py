@@ -169,36 +169,30 @@ class TestModel:
         assert single_int.get_keys() == (3,)
 
     def test_get_mutable(self, a, b):
-        assert set(a._mutable) == set(['id', 'a', 'b'])
-        assert set(b._mutable) == set(['ref', 'c'])
+        assert set(a._class_mutable) == set(['id', 'a', 'b'])
+        assert set(b._class_mutable) == set(['ref', 'c'])
         assert set(a._get_mutable_fields().values()) == set([DefaultPrimaryKey, 1, 'a'])
         assert set(b._get_mutable_fields().values()) == set([DefaultPrimaryKey, 'b'])
 
-    def test_copy(self, a, b, c):
-        a.id = 1
-        a.a, a.b = 2, "3"
-
-        b.ref, b.c = a, 4
-        c.ref, c.d = [b], "5"
-
-        c_c = c.copy()
-        c_b = c_c.ref[0]
-        c_a = c_b.ref
-
-        assert c_a.id == 1
-        assert c_a.a == 2
-        assert c_a.b == "3"
-        assert c_b.c == 4
-        assert c_c.d == "5"
-
-    def test_copy_circular(self):
-        d = ModelD()
-        e = ModelE()
-
-        e.ref, d.ref = d, e
-        c_d = d.copy()
-
-        assert c_d.ref._internal_id == e._internal_id
+    def test_modify_mutable(self, a):
+        old_value_a, old_value_b = a.a, a.b
+        new_value_a = "new value a"
+        new_value_b = "new value b"
+        assert not a._persistent_values
+        a.a = new_value_a
+        a.b = new_value_b
+        assert a.a == new_value_a
+        assert a._persistent_values['a'] == old_value_a
+        assert a.b == new_value_b
+        assert a._persistent_values['b'] == old_value_b
+        a.a = old_value_a
+        assert 'a' not in a._persistent_values
+        assert a.a == old_value_a
+        assert a.b == new_value_b
+        assert a._persistent_values['b'] == old_value_b
+        a.b = old_value_b
+        assert a.b == old_value_b
+        assert 'b' not in a._persistent_values
 
     def test_get_children(self):
         a = ModelA()
@@ -227,7 +221,8 @@ class TestModel:
 
     def test_equal(self):
         a1, a2 = ModelA(), ModelA()
-        a3 = a1.copy()
+        a3 = ModelA()
+        a3._internal_id = a1._internal_id
 
         assert a1 != a2
         assert a1 == a3
