@@ -420,7 +420,8 @@ class Transaction:
             def func(target, x) -> CallbackCoroutineCallable:
                 async def dao_call() -> Tuple[Node, Any]:
                     try:
-                        return x, await target(x.node_object)
+                        await target(x.node_object)
+                        return x, x.node_object
                     except Exception as ex:
                         raise NodeProcessException(ex, x)
 
