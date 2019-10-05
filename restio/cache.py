@@ -12,14 +12,16 @@ class ModelCache:
     indexes.
     """
 
-    _id_cache: Dict[Tuple[str, str], BaseModel] = {}
-    _key_cache: Dict[Tuple[str, Tuple[ValueKey, ...]], BaseModel] = {}
+    _id_cache: Dict[Tuple[str, str], BaseModel]
+    _key_cache: Dict[Tuple[str, Tuple[ValueKey, ...]], BaseModel]
 
     def __init__(self):
-        self._id_cache = {}
-        self._key_cache = {}
+        self.reset()
 
     def reset(self):
+        """
+        Resets the internal cache.
+        """
         self._id_cache = {}
         self._key_cache = {}
 
@@ -28,6 +30,13 @@ class ModelCache:
         assert isinstance(obj, BaseModel)
 
     def register(self, obj: BaseModel, force: bool = False) -> bool:
+        """Registers a model into the internal cache.
+
+        :param obj: The model to be registered.
+        :param force: Forces the registration of the model again if it
+                      is already in cache. Defaults to False
+        :return: True if the model has been registered. False otherwise.
+        """
         self._check_object_type(obj)
 
         obj_type = obj.__class__
@@ -54,6 +63,11 @@ class ModelCache:
         return False
 
     def unregister(self, obj: BaseModel):
+        """Unregisters a model from cache.
+
+        :param obj: The model to be unregistered.
+        :raises ValueError: When model is not found in cache.
+        """
         self._check_object_type(obj)
 
         obj_type = obj.__class__
@@ -80,12 +94,28 @@ class ModelCache:
         return False
 
     def get_by_primary_key(self, model_type: Type[BaseModel], value: Tuple[ValueKey, ...]) -> Optional[BaseModel]:
+        """Finds model in cache by its primary key.
+
+        :param model_type: The model type to be retrieved.
+        :param value: The primary key that identifies the model.
+        :return: If found in cache, returns the model instance. Returns None otherwise.
+        """
         return self._key_cache.get((str(model_type.__name__), value), None)
 
     def get_by_internal_id(self, model_type: Type[BaseModel], internal_id: UUID) -> Optional[BaseModel]:
+        """Finds model in cache by its internal id.
+
+        :param model_type: The model type to be retrieved.
+        :param value: The unique internal id that identifies the model.
+        :return: If found in cache, returns the model instance. Returns None otherwise.
+        """
         return self._id_cache.get((str(model_type.__name__), str(internal_id)), None)
 
     def get_all_models(self) -> Set[BaseModel]:
+        """Returns a set of all models in cache.
+
+        :return: The set containing all models.
+        """
         return set(self._id_cache.values())
 
 
@@ -97,12 +127,23 @@ class QueryCache:
     _cache: Dict[str, List[BaseModel]]
 
     def __init__(self):
-        self._cache = {}
+        self.reset()
 
     def reset(self):
+        """
+        Resets the internal cache.
+        """
         self._cache = {}
 
     def register(self, obj: BaseQuery, results: List[BaseModel], force: bool = False) -> bool:
+        """Register a query in cache.
+
+        :param obj: The query instance.
+        :param results: The list of results from the query.
+        :param force: Forces registration of the results from query again
+                      if it is already registered in cache. Defaults to False
+        :return: True if the results have been registered. False otherwise.
+        """
         assert obj is not None
         assert isinstance(obj, Hashable)
 
@@ -127,6 +168,12 @@ class QueryCache:
         ...
 
     def get(self, obj_hash):
+        """Returns results stored in cache for a particular query.
+
+        :param obj_hash: The query hash.
+        :type obj_hash: Union[str, BaseQuery]
+        :return: The results from the query if stored in cache.
+        """
         if isinstance(obj_hash, BaseQuery):
             obj_hash = obj_hash.__hash__()
         return self._cache.get(str(obj_hash))
