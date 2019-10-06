@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field, is_dataclass
+from dataclasses import Field, dataclass, field, is_dataclass
 from typing import (Any, ClassVar, Dict, ForwardRef, Generic, List, Optional,
                     Set, Tuple, Type, TypeVar, Union)
 from uuid import UUID, uuid4
@@ -25,7 +25,18 @@ DefaultPrimaryKey = _DefaultPrimaryKey()
 T = TypeVar('T', int, str, _DefaultPrimaryKey)
 
 
+# TODO: Replace the current usage of PrimaryKey for the Descriptor Pattern
 class PrimaryKey(Generic[T]):
+    """
+    Represents a primary key in a remote model, in a similar fashion as if
+    it would be stored in a relational database. The PrimaryKey fields are
+    arbitrary to the developer's choice and used to identify models on the
+    internal cache, used as reference for retrieval from the remote server
+    and represent model uniqueness within a Transaction scope.
+
+    Each PrimaryKey is a generic type and should explicitly indicate the type
+    during declaration in a BaseModel.
+    """
     value: T
     _type: Type[T]
 
@@ -37,12 +48,24 @@ class PrimaryKey(Generic[T]):
         self.set(value)
 
     def set(self, value: T):
+        """
+        Sets the value of the PrimaryKey.
+
+        :param value: The value contained by the PrimaryKey.
+        :raises RuntimeError: If `value` is not of the type T specified during
+                              the declaration of the instance.
+        """
         if value is not DefaultPrimaryKey and not issubclass(type(value), self._type):
             raise RuntimeError(f"Primary key value must be of type {self._type.__name__}")
 
         self.value = value
 
     def get(self) -> T:
+        """
+        Returns the value stored by the PrimaryKey.
+
+        :return: The value stored by the instance.
+        """
         return self.value
 
     def __eq__(self, other: object) -> bool:
@@ -56,18 +79,37 @@ class PrimaryKey(Generic[T]):
 
 
 ValueKey = Union[T, PrimaryKey]
+"""
+Represents the Union of a PrimaryKey or the value stored by it.
+"""
 
 
 def mdataclass(*args, **kwargs):
+    """
+    Wrapper around the dataclass() decorator used to guarantee that subclasses of
+    BaseModel are dataclasses constructed with the proper configuration.
+    """
     kwargs['eq'] = kwargs.get('eq', False)
     return dataclass(*args, **kwargs)
 
 
-def pk(key_type: Type[T], default_value: T = DefaultPrimaryKey, **kwargs):
+def pk(key_type: Type[T], default_value: T = DefaultPrimaryKey, **kwargs) -> Field:
+    """
+    dataclasses.field() initializer for PrimaryKeys in subclasses of BaseModel.
+
+    :param key_type: The type stored by the PrimaryKey.
+    :param default_value: The key initial value, defaults to DefaultPrimaryKey
+    :return: A dataclasses.Field instance.
+    """
     return field(default_factory=lambda: PrimaryKey(key_type, default_value), **kwargs)
 
 
 class BaseModelMeta(type):
+    """
+    BaseModel metaclass. Responsible to internally cache the data schema in a
+    BaseModel subclass by identifying fields that are primary keys, mutable and
+    immutable.
+    """
     _class_mutable: Set[str]
     _class_immutable: Set[str]
 
@@ -127,8 +169,51 @@ class BaseModelMeta(type):
 MODEL_UPDATE_EVENT = "__updated__"
 
 
+# TODO: break down the default and non-default fields in BaseModel into two separate
+# classes to allow non-default fields on child models. For more information, see
+# https://stackoverflow.com/questions/51575931/class-inheritance-in-python-3-7-dataclasses
+
 @mdataclass
 class BaseModel(Generic[T], metaclass=BaseModelMeta):
+    """
+    A representation of a remote object model into a restio.Transaction object.
+
+    BaseModel is an abstract class that should be extended to represent models incoming
+    from or outgoing to a remote REST API. The subclasses should be mandatorily dataclasses.
+
+    Models can exist independently from Transactions but contain an internal state that
+    indicates the status of the model within the current context. The transactions are
+    responsible to control this state. Also, each model contains a set of control attributes
+    that indicate which fields are mutable, immutable or primary keys (provided by the
+    BaseModelMeta).
+
+    Models that change over time will contain an internal dictionary with the latest
+    know persistent value of each field. This is done to guarantee fast rollback of the
+    values when the Transaction is invalid, and to also indicate which values might have
+    changed within the transaction scope. If a mutable field is modified directly, the model
+    will intercept the change and save the older value into the persistent dictionary until
+    `_persist` is called. During a `_rollback` call, however, the stored values are re-assigned
+    to their original attributes. Each attribute change will also dispatch an update event so
+    that the transaction is aware of changes and manages the model's internal state accordingly.
+    The persistent dictionary can also be potentially used by DAO's to verify which values where
+    updated prior to sending a request through the REST API, thus allowing for proper optimization
+    and minimizing chances of conflicting changes on the remote object.
+
+    All models automatically generate a random internal UUID when created. This UUID is used
+    internally for comparison purposes, and externally as an identity.
+
+    :Example:
+
+    @mdataclass
+    class Person(BaseModel):
+        id: PrimaryKey[int] = pk(int)
+        name: str = ""
+        age: int = 0
+
+    m = Person(id=1, name="Bob", age=10)
+    print(m)  # Person(id=1, name="Bob", age=10)
+
+    """
     _class_primary_keys: ClassVar[Dict[str, type]]
     _class_typed_fields: ClassVar[Dict[str, type]]
     _class_mutable: ClassVar[Set[str]]
@@ -151,6 +236,11 @@ class BaseModel(Generic[T], metaclass=BaseModelMeta):
             for key in self._class_primary_keys])
 
     def get_keys(self) -> Tuple[Optional[T], ...]:
+        """
+        Returns the internal tuple with the primary keys if the class.
+
+        :return: The tuple with primary keys.
+        """
         return self._primary_keys
 
     def _get_mutable_fields(self) -> Dict[str, Any]:
@@ -159,6 +249,20 @@ class BaseModel(Generic[T], metaclass=BaseModelMeta):
     def get_children(
         self, recursive: bool = False, children: List[BaseModel] = None, top_level: Optional[BaseModel] = None
     ) -> List[BaseModel]:
+        """
+        Returns the list of all children of the current model. This algorithm checks in
+        runtime for all objects refered by the instance, whether directly, through a list
+        or a set. When `recursive` is True, then the algorith will recursively search through
+        all children. `children` and `top_level` are control variables that indicate which
+        models have already been inspected by this function, in order to avoid infinite
+        recursion if any circular dependency exists.
+
+        :param recursive: If True, recursively searches for children. Returns only
+                          first degree relationships otherwise. Defaults to False.
+        :param children: List of existing models already inspected.
+        :param top_level: The top-level model from where inspection started.
+        :return: The list of all children.
+        """
 
         if children is None:
             children = []
@@ -190,13 +294,23 @@ class BaseModel(Generic[T], metaclass=BaseModelMeta):
         return children
 
     def _rollback(self):
+        """
+        Restore the persistent values in the model to their original attributes.
+        """
         for attr, value in list(self._persistent_values.items()):
             setattr(self, attr, value)
 
         self._persistent_values = {}
 
     def _persist(self):
+        """
+        Persists the current attribute values by emptying the internal persistent
+        dictionary. Once this is called, it is not possible to rollback to the
+        old values anymore. It is recommended that this method should only be called
+        by the party that persisted the values on the remote server.
+        """
         self._persistent_values = {}
+        self._primary_keys = self._get_primary_keys()
 
     def _update(self, name, value):
         if not self._initialized:

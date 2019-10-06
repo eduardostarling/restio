@@ -1,23 +1,23 @@
-from typing import Dict, Tuple, Optional
-from enum import Enum
+from enum import IntEnum, auto
+from typing import Dict, Optional, Tuple
 
 
-class ModelState(Enum):
-    CLEAN = 0
-    NEW = 1
-    DIRTY = 2
-    DELETED = 3
-    DISCARDED = 4
+class ModelState(IntEnum):
+    CLEAN = auto()
+    NEW = auto()
+    DIRTY = auto()
+    DELETED = auto()
+    DISCARDED = auto()
 
 
-class Transition(Enum):
-    EXISTING_OBJECT = 000
-    PERSIST_OBJECT = 100
-    ADD_OBJECT = 200
-    UPDATE_OBJECT = 300
-    REMOVE_OBJECT = 400
-    ROLLBACK_OBJECT = 500
-    CLEAN_OBJECT = 600
+class Transition(IntEnum):
+    EXISTING_OBJECT = auto()
+    PERSIST_OBJECT = auto()
+    ADD_OBJECT = auto()
+    UPDATE_OBJECT = auto()
+    REMOVE_OBJECT = auto()
+    ROLLBACK_OBJECT = auto()
+    CLEAN_OBJECT = auto()
 
 
 class ModelStateMachine:
