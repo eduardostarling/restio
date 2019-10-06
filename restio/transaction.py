@@ -309,7 +309,7 @@ class Transaction:
         )
 
         directions: List[NavigationDirection] = [
-            NavigationDirection.LEAFS_TO_ROOTS, NavigationDirection.LEAFS_TO_ROOTS, NavigationDirection.ROOTS_TO_LEAFS
+            NavigationDirection.LEAVES_TO_ROOTS, NavigationDirection.LEAVES_TO_ROOTS, NavigationDirection.ROOTS_TO_LEAVES
         ]
 
         try:
