@@ -1,6 +1,6 @@
 import asyncio
 from collections import deque
-from enum import Enum
+from enum import IntEnum, auto
 from functools import wraps
 from typing import (Any, Deque, Dict, List, Optional, Set, Tuple, Type, cast,
                     overload)
@@ -16,20 +16,28 @@ from .state import ModelState, ModelStateMachine, Transition
 
 
 class TransactionOperationError(Exception):
+    """
+    Represents a single exception during the `commit` of a Transaction.
+    """
     def __init__(self, error: Exception, model: BaseModel):
         super().__init__(error)
         self.model = model
 
 
 class TransactionError(Exception):
+    """
+    Represents a collection of exceptions raised during the `commit` of a Transaction.
+    """
     def __init__(self, errors: Deque[TransactionOperationError], processed_models: Deque[BaseModel]):
         super().__init__()
         self.errors = errors
         self.models = processed_models
 
 
-class PersistencyStrategy(Enum):
+class PersistencyStrategy(IntEnum):
     """
+    Defines the strategy of error handling during a Transaction `commit`.
+
     INTERRUPT_ON_ERROR (default):
         The transaction will be interrupted if any operation with the
         server throws an exception. The operations already performed
@@ -37,9 +45,7 @@ class PersistencyStrategy(Enum):
         hang until all running tasks finalize, then a TransactionError
         is thrown, containing the list of all models that have not been
         persisted on local cache. This is the recommended approach.
-    """
-    INTERRUPT_ON_ERROR = 0
-    """
+
     CONTINUE_ON_ERROR:
         The transaction will continue processing all models in the
         dependency tree that have been marked for modification. The
@@ -48,32 +54,83 @@ class PersistencyStrategy(Enum):
         end, a TransactionError is thrown, containing the list of all
         models that have not been persisted on local cache.
     """
-    CONTINUE_ON_ERROR = 1
+    INTERRUPT_ON_ERROR = auto()
+    CONTINUE_ON_ERROR = auto()
 
 
-class TransactionState(Enum):
-    STANDBY = 0
-    GET = 1
-    COMMIT = 2
-    ROLLBACK = 3
+class TransactionState(IntEnum):
+    """
+    Stores the current state of the transaction. The state is used by the transaction
+    scope for decision making when particular actions are being executed.
+
+    - STANDBY: The transaction has been created and is not performing any action.
+    - GET: The transaction is currently acquiring a model from the remote server.
+    - COMMIT: The transaction is performing a commit.
+    - ROLLBACK: The transaction is performing a rollback.
+    """
+    STANDBY = auto()
+    GET = auto()
+    COMMIT = auto()
+    ROLLBACK = auto()
 
 
 def transactionstate(state: TransactionState):
+    """
+    Decorates the current method to define the state of the transaction
+    during its execution.
+    """
     def deco(func):
         @wraps(func)
         def wrapper(self, *args, **kwargs):
             previous = self._state
             self._state = state
 
-            result = func(self, *args, **kwargs)
+            try:
+                result = func(self, *args, **kwargs)
+                return result
+            except Exception:
+                raise
+            finally:
+                self._state = previous
 
-            self._state = previous
-            return result
         return wrapper
     return deco
 
 
 class Transaction:
+    """
+    Module to manage an abstracted Transaction scope of a REST API server.
+
+    The transaction will manage an internal cache where it stores the models
+    retrieved from or persisted to the remote REST API. Models are uniquely
+    identified by their internal id and their primary keys. Trying to retrieve
+    the same model twice within the same scope will make the transaction return
+    the cached models instead of querying the remote server.
+
+    When all models have been modified, created or deleted, the transaction can
+    be persisted on the remote server with `commit`.
+
+    The transaction should know how to manipulate each model type by registering
+    the respective DAOs with `register_dao`. When asked to `get`, `add` or
+    `remove` a model, the Transaction  will look up for the DAO associated with
+    the provided model type. If the DAOs raise exeptions during `commit`, then
+    the transaction will handle the erros based on the predefined
+    PersistenceStrategy provided during instantiation.
+
+    `get` operations will be executed on spot, while `add`, `remove` and `_update`
+    will be scheduled to run during `commit`. The transaction will decide in which
+    order to manipulate each model based on dependency trees generated in runtime.
+    The transaction will try to parallelize the calls to the remote server as much
+    as possible to guarantee data consistency. The dependency trees vary with the
+    current internal state of each model instance before commit. The state of the
+    models is managed by the transaction itself.
+
+    After a `commit` is done, all models that have been persisted on the remote
+    server successfully will be persisted on the local cache, even if errors
+    occur in parallel tasks. DAOs are allowed to modify the models locally
+    during `add` or `update`, since the transaction will pick up the final values
+    and persist them on local cache.
+    """
     _model_cache: ModelCache
     _query_cache: QueryCache
     _daos: Dict[Type[BaseModel], BaseDAO]
@@ -90,17 +147,31 @@ class Transaction:
         self._model_lock = {}
 
     def reset(self):
+        """
+        Resets the internal cache. All references to models are lost.
+        """
         self._model_cache.reset()
         self._query_cache.reset()
         self._model_lock = {}
 
     def register_dao(self, dao: BaseDAO):
+        """
+        Registers a DAO instance to the transaction and maps its model
+        type in the local dictionary.
+
+        :param dao: The DAO instance.
+        """
         model_type = dao._model_type
 
         if model_type not in self._daos:
             self._daos[model_type] = dao
 
     def get_dao(self, model_type: Type[BaseModel]) -> Optional[BaseDAO]:
+        """Returns the DAO associated with the `model_type`.
+
+        :param model_type: The BaseModel subclass.
+        :return: The DAO instance, if found. None otherwise.
+        """
         return self._daos.get(model_type)
 
     def _register_model(self, model: BaseModel, force: bool = False, register_children: bool = True):
@@ -128,14 +199,43 @@ class Transaction:
         model._listener.unsubscribe(MODEL_UPDATE_EVENT, self._update)
 
     def register_model(self, model: BaseModel, force: bool = False, register_children: bool = True):
+        """
+        Registers the `model` in the internal cache. If the model is already
+        registered and `force` is False, then the operation is skipped.
+
+        :param model: The model instance to be registered.
+        :param force: Forces the operation if True, skips otherwise.
+                      Defaults to False.
+        :param register_children: If True, also registers children objects
+                                  of the model in the local cache recursively.
+                                  Skips children if False. Defaults to True.
+        :raises RuntimeError: When `register_children` is False and a child
+                              of the model is not registered.
+        """
         if not model:
             return
 
         self._register_model(model, force, register_children)
 
+    # TODO: review registering and retrieving of queried models when
+    # some are already stored in model cache
     def register_query(
         self, query: BaseQuery, models: List[BaseModel], force: bool = False, register_children: bool = True
     ):
+        """
+        Registers the `query` and its `models` in the internal cache.
+        If any of the models is already registered and `force` is False,
+        then they are not persisted into the model cache again.
+
+        :param model: The model instance to be registered.
+        :param force: Forces the operation if True, skips otherwise.
+                      Defaults to False.
+        :param register_children: If True, also registers children objects
+                                  of the model in the local cache recursively.
+                                  Skips children if False. Defaults to True.
+        :raises RuntimeError: When `register_children` is False and a child
+                              of the model is not registered.
+        """
         self._query_cache.register(query, models)
 
         for model in models:
@@ -155,6 +255,16 @@ class Transaction:
 
     @transactionstate(TransactionState.GET)
     async def get(self, model_type, value):
+        """
+        Tries retrieving the model of type `model_type` and primary key `value`
+        from local cache. If not found, then calls the `get` method of the DAO
+        associated to the `model_type`. Returns None if no model is found.
+
+        :param model_type: The BaseModel subclass representing the model.
+        :param value: The primary key collection that represents the model.
+        :raises RuntimeError: When no DAO is associated with the `model_type`.
+        :return: The model instance if found, None otherwise.
+        """
         if isinstance(value, list):
             value = tuple(value)
 
@@ -186,6 +296,14 @@ class Transaction:
         return self._model_lock[lock_hash]
 
     def add(self, model: BaseModel) -> bool:
+        """
+        Adds new `model` to the local cache and schedules for adding in the remote
+        server during `commit`.
+
+        :param model: The model instance.
+        :raises RuntimeError: If the model has been already registered in cache.
+        :return: True if the model is scheduled for adding, False otherwise.
+        """
         assert model is not None
 
         model_cache = self._model_cache.get_by_internal_id(model.__class__, model._internal_id)
@@ -213,6 +331,12 @@ class Transaction:
         return model_cache
 
     def remove(self, model: BaseModel) -> bool:
+        """
+        Schedules model for removal on the remote server during `commit`.
+
+        :param model: The model instance.
+        :return: True if model is scheduled for removal, False otherwise.
+        """
         model_cache = self._assert_cache_internal_id(model)
         model_cache._state = ModelStateMachine.transition(Transition.REMOVE_OBJECT, model_cache._state)
 
@@ -240,6 +364,14 @@ class Transaction:
         return updated
 
     async def query(self, query: BaseQuery, force: bool = False) -> List[BaseModel]:
+        """
+        Runs custom query `query` and registers results on local cache.
+
+        :param query: The query instance to be executed.
+        :param force: Forces running the query even if it has been
+                      already cached.
+        :return: The list of models retrieved from the query.
+        """
         if not force:
             cached_results = self._query_cache.get(query)
             if cached_results is not None:
@@ -280,6 +412,13 @@ class Transaction:
 
     @transactionstate(TransactionState.COMMIT)
     async def commit(self):
+        """
+        Persists all models on the remote server. Models that have been successfully
+        submited are also persisted on the local cache by the end of the operation.
+
+        :raises RuntimeError: When model doesn't have a DAO associated with its type.
+        :raises TransactionError: When the commit fails on DAO level.
+        """
         cached_values = self._model_cache.get_all_models()
 
         models_to_add = self._get_models_to_add(cached_values)
@@ -440,6 +579,10 @@ class Transaction:
 
     @transactionstate(TransactionState.ROLLBACK)
     def rollback(self):
+        """
+        Discards all changes to the local cache. New models are discarded and
+        local changes to models retrieved from the remote are ignored.
+        """
         for model in self._model_cache.get_all_models():
             model._state = ModelStateMachine.transition(Transition.ROLLBACK_OBJECT, model._state)
             if model._state == ModelState.DISCARDED:
