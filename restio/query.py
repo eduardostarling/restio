@@ -4,6 +4,9 @@ import inspect
 
 
 class BaseQuery:
+    """
+    Defines a query object to be processed by a Transaction.
+    """
     __args: List = []
     __kwargs: Dict[str, Any] = {}
 
@@ -36,6 +39,15 @@ class BaseQuery:
 
 
 def query(function=None):
+    """
+    Query decorator. This should be used to decorate functions that return
+    query results to be stored by a Transaction. All decorated functions should
+    start with a `self` parameter that will contain the Transaction instance object.
+
+    Queries are useful when performing batch operations on the remote server. The
+    Transaction instance will use the query results and store them internally for
+    caching purposes.
+    """
     params = inspect.signature(function).parameters
     keys = list(params.keys())
 
