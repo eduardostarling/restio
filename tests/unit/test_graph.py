@@ -186,7 +186,7 @@ class TestNode(ModelsFixture):
 class TestTree(ModelsFixture):
     async def validate_process(self, models, nodes, trees):
         processed_nodes = []
-        directions = (NavigationDirection.LEAFS_TO_ROOTS, NavigationDirection.ROOTS_TO_LEAFS)
+        directions = (NavigationDirection.LEAVES_TO_ROOTS, NavigationDirection.ROOTS_TO_LEAVES)
 
         for direction in directions:
             from_direction, to_direction = direction.value
@@ -256,7 +256,7 @@ class TestTree(ModelsFixture):
     def test_navigation_invalid_node(self, models, nodes, trees):
         first_tree, second_tree = trees
 
-        gen = first_tree.navigate(first_tree.get_nodes(), NavigationDirection.LEAFS_TO_ROOTS,
+        gen = first_tree.navigate(first_tree.get_nodes(), NavigationDirection.LEAVES_TO_ROOTS,
                                   deque(second_tree.get_nodes()))
 
         next(gen)

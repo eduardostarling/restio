@@ -599,7 +599,7 @@ class TestTransaction:
 
         y = DependencyGraph.generate_from_objects(models)
 
-        processed_models = await t._process_all_trees(y, NavigationDirection.LEAFS_TO_ROOTS)
+        processed_models = await t._process_all_trees(y, NavigationDirection.LEAVES_TO_ROOTS)
         models = models.difference(set(processed_models))
 
         assert len(models) == 0
@@ -615,7 +615,7 @@ class TestTransaction:
 
         y = DependencyGraph.generate_from_objects(models)
 
-        processed_models = list(reversed(await t._process_tree(y.trees[0], NavigationDirection.LEAFS_TO_ROOTS)))
+        processed_models = list(reversed(await t._process_tree(y.trees[0], NavigationDirection.LEAVES_TO_ROOTS)))
 
         assert models == processed_models
 
