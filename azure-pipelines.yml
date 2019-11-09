@@ -76,13 +76,13 @@ jobs:
       displayName: 'Download Python Wheel'
       inputs:
         artifactName: PythonWheel
-        downloadPath: $(System.DefaultWorkingDirectory)/dist
+        downloadPath: $(System.DefaultWorkingDirectory)
 
     - task: DownloadBuildArtifacts@0
       displayName: 'Download requirements.txt'
       inputs:
         artifactName: PackageRequirements
-        downloadPath: $(System.DefaultWorkingDirectory)/requirements.txt
+        downloadPath: $(System.DefaultWorkingDirectory)
 
     - script: |
         python -m pip install --upgrade pip
@@ -123,19 +123,19 @@ jobs:
       displayName: 'Download Python Wheel'
       inputs:
         artifactName: PythonWheel
-        downloadPath: $(System.DefaultWorkingDirectory)/dist
+        downloadPath: $(System.DefaultWorkingDirectory)
 
     - task: DownloadBuildArtifacts@0
       displayName: 'Download requirements.txt'
       inputs:
         artifactName: PackageRequirements
-        downloadPath: $(System.DefaultWorkingDirectory)/requirements.txt
+        downloadPath: $(System.DefaultWorkingDirectory)
 
     - task: DownloadBuildArtifacts@0
       displayName: 'Download Documentation'
       inputs:
         artifactName: Documentation
-        downloadPath: $(System.DefaultWorkingDirectory)/docs/build
+        downloadPath: $(System.DefaultWorkingDirectory)
 
     - script: |
         python -m pip install --upgrade pip
