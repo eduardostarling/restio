@@ -69,8 +69,6 @@ class EmployeeDAO(BaseDAO):
         if not ok:
             raise Exception(f"Error while modifying employee {model.id}.")
 
-        return model
-
     def _get_model(self, json):
         return Employee(
             id=int(json['id']), name=str(json['employee_name']),
@@ -120,10 +118,12 @@ async def main():
 
     # makes a change to be reflected on the server
     employee.name = "MyAwesomeName" + str(random.randint(10000, 99999))
+    print("Employee persistent cache: ", employee._persistent_values)
 
     # submits the change to the remote server
     await t.commit()
     print("Employee modified: ", employee)
+    print("Employee persistent cache after modifying: ", employee._persistent_values)
 
     # resets the local cache
     t.reset()
