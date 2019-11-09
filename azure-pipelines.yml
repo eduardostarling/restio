@@ -49,7 +49,7 @@ jobs:
 
     - task: PublishBuildArtifacts@1
       displayName: 'Publish Documentation'
-      condition: eq(variables['Build.SourceBranch'], 'refs/heads/master')
+      #condition: eq(variables['Build.SourceBranch'], 'refs/heads/master')
       inputs:
         pathtoPublish: '$(System.DefaultWorkingDirectory)/docs/build'
         artifactName: Documentation
