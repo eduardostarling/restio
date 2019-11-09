@@ -15,7 +15,6 @@ pytest-asyncio = "*"
 pytest-xdist = "*"
 pytest-cov = "*"
 requests = "*"
-twine = "*"
 wheel = "*"
 sphinx = "*"
 doc8 = "*"
@@ -25,11 +24,7 @@ m2r = "*"
 [packages]
 restio = {editable = true,path = "."}
 
-[requires]
-python_version = "3.7.4"
-
 [scripts]
 test = "python tests/test.py"
 docs = "sphinx-build -b html docs/source docs/build"
 build = "python setup.py bdist_wheel"
-publish = "python -m twine upload -r 'pypi-restio' --config-file $(PYPIRC_PATH) dist/*.whl"
