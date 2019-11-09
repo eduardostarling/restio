@@ -1,7 +1,7 @@
 
 # Framework
 
-The **RestIO** framework is composed by a few building blocks:
+The **restio** framework is composed by a few building blocks:
 
 - Model
 - Data Access Object
