@@ -4,10 +4,10 @@ sphinx:
   configuration: docs/source/conf.py
 
 python:
-   version: 3.7
-   install:
-      - method: pip
-        extra_requirements:
-           - m2r
-      - method: setuptools
-        path: .
+  version: 3.7
+  install:
+    - method: pip
+      extra_requirements:
+        - m2r
+    - method: setuptools
+      path: .
