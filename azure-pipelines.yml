@@ -141,7 +141,9 @@ jobs:
       inputs:
         pythonUploadServiceConnection: restio
 
+    # the sed command below fixes the wrong username=build introduced
+    # by the TwineAuthenticate command above
     - script: |
-        cat $(PYPIRC_PATH)
+        sed -i 's/username=build/username=__token__/g' $(PYPIRC_PATH)
         python -m twine upload -r restio --config-file $(PYPIRC_PATH) PythonWheel/*
       displayName: "Publish to PyPI"
