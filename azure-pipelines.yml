@@ -32,7 +32,7 @@ jobs:
       displayName: 'Build Python Wheel'
 
     - script: |
-        pipenv lock -r --dev
+        pipenv lock -r --dev > requirements.txt
       displayName: 'Lock dependencies to requirements.txt'
 
     - task: PublishBuildArtifacts@1
