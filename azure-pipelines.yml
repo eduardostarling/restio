@@ -134,12 +134,12 @@ jobs:
         python -m pip install --upgrade pip
         python -m pip install twine
         python -m pip install wheel
-
       displayName: 'Install dependencies for version $(python.version)'
+
     - task: TwineAuthenticate@1
       inputs:
-        pythonUploadServiceConnection: 'pypi-restio'
+        pythonUploadServiceConnection: restio
 
     - script: |
-        python -m twine upload -r 'pypi-restio' --config-file $(PYPIRC_PATH) PythonWheel/*.whl
+        python -m twine upload -r restio --config-file $(PYPIRC_PATH) PythonWheel/*
       displayName: "Publish to PyPI"
