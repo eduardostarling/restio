@@ -94,6 +94,12 @@ jobs:
         python tests/test.py
       displayName: 'Run tests on version $(python.version)'
 
+    - task: PublishTestResults@2
+      condition: succeededOrFailed()
+      inputs:
+        testResultsFiles: '**/test-*.xml'
+        testRunTitle: 'Publish test results for Python $(python.version)'
+
     - task: PublishCodeCoverageResults@1
       inputs:
         codeCoverageTool: Cobertura
@@ -142,5 +148,5 @@ jobs:
         pythonUploadServiceConnection: 'pypi-restio'
 
     - script: |
-        python -m twine upload -r 'pypi-restio' --config-file $(PYPIRC_PATH) PythonWheel/dist/*.whl
+        python -m twine upload -r 'pypi-restio' --config-file $(PYPIRC_PATH) $(System.DefaultWorkingDirectory)/PythonWheel/dist/*.whl
       displayName: "Publish to PyPI"
