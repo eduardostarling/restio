@@ -12,5 +12,6 @@ pytest.main([
     "-n", "auto",
     "--cov-report", "xml",
     "--cov-report", "html",
+    "--junitxml=test-results.xml",
     "--cov-branch"
 ])
