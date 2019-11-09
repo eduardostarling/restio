@@ -142,5 +142,6 @@ jobs:
         pythonUploadServiceConnection: restio
 
     - script: |
+        cat $(PYPIRC_PATH)
         python -m twine upload -r restio --config-file $(PYPIRC_PATH) PythonWheel/*
       displayName: "Publish to PyPI"
