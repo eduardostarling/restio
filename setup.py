@@ -25,5 +25,6 @@ setuptools.setup(
     project_urls={
         "Documentation": read_the_docs_url,
         "Source Code": git_url,
-    }
+    },
+    python_requires='>=3.7'
 )

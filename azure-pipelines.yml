@@ -1,50 +1,152 @@
 trigger:
 - master
 
-pool:
-  vmImage: 'ubuntu-latest'
-strategy:
-  matrix:
-    Python37:
-      python.version: '3.7.4'
+jobs:
+  # build job - only runs on latest supported python
+  # version and publishes artifacts for further jobs
+  - job: Build
+    pool:
+      vmImage: 'ubuntu-latest'
+    strategy:
+      matrix:
+        Python38:
+          python.version: '3.8'
+    steps:
+    - task: UsePythonVersion@0
+      displayName: 'Use Python $(python.version)'
+      inputs:
+        versionSpec: '$(python.version)'
 
-steps:
-- task: UsePythonVersion@0
-  inputs:
-    versionSpec: '$(python.version)'
-  displayName: 'Use Python $(python.version)'
+    - script: |
+        python -m pip install --upgrade pip
+        python -m pip install pipenv
+        pipenv install --dev
+      displayName: 'Install dependencies for version $(python.version)'
 
-- script: |
-    python -m pip install --upgrade pip
-    pip install pipenv
-    pipenv install --dev
-  displayName: 'Install dependencies'
+    - script: |
+        pipenv run docs
+      displayName: 'Build Documentation'
 
-- script: |
-    pipenv run test
-  displayName: 'Run tests'
+    - script: |
+        pipenv run build
+      displayName: 'Build Python Wheel'
 
-- task: PublishCodeCoverageResults@1
-  inputs:
-    codeCoverageTool: Cobertura
-    summaryFileLocation: '$(System.DefaultWorkingDirectory)/coverage.xml'
-    reportDirectory: '$(System.DefaultWorkingDirectory)/htmlcov'
+    - script: |
+        pipenv lock -r --dev
+      displayName: 'Lock dependencies to requirements.txt'
 
-- script: |
-    pipenv run docs
-  displayName: 'Build Documentation'
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish requirements.txt'
+      inputs:
+        pathtoPublish: '$(System.DefaultWorkingDirectory)/requirements.txt'
+        artifactName: PackageRequirements
 
-- script: |
-    pipenv run build
-  displayName: 'Build Python Wheel'
-  continueOnError: False
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish Python Wheel'
+      inputs:
+        pathtoPublish: '$(System.DefaultWorkingDirectory)/dist'
+        artifactName: PythonWheel
 
-- task: TwineAuthenticate@1
-  inputs:
-    pythonUploadServiceConnection: 'pypi-restio'
-  #condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish Documentation'
+      condition: eq(variables['Build.SourceBranch'], 'refs/heads/master')
+      inputs:
+        pathtoPublish: '$(System.DefaultWorkingDirectory)/docs/build'
+        artifactName: Documentation
 
-- script: |
-    pipenv run publish
-  #condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
-  displayName: "Publish to PyPI"
+  - job: Test
+    pool:
+      vmImage: 'ubuntu-latest'
+    strategy:
+      matrix:
+        Python37:
+          python.version: '3.7'
+        Python38:
+          python.version: '3.8'
+      maxParallel: 2
+    dependsOn: Build
+    condition: succeeded('Build')
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '$(python.version)'
+      displayName: 'Use Python $(python.version)'
+
+    - task: DownloadBuildArtifacts@0
+      displayName: 'Download Python Wheel'
+      inputs:
+        artifactName: PythonWheel
+        downloadPath: $(System.DefaultWorkingDirectory)/dist
+
+    - task: DownloadBuildArtifacts@0
+      displayName: 'Download requirements.txt'
+      inputs:
+        artifactName: PackageRequirements
+        downloadPath: $(System.DefaultWorkingDirectory)/requirements.txt
+
+    - script: |
+        python -m pip install --upgrade pip
+        python -m pip install --use-wheel --no-index --find-links=$(System.DefaultWorkingDirectory)/dist restio
+        python -m pip install -r requirements.txt
+      displayName: 'Install dependencies for version $(python.version)'
+
+    - script: |
+        python tests/test.py
+      displayName: 'Run tests on version $(python.version)'
+
+    - task: PublishCodeCoverageResults@1
+      inputs:
+        codeCoverageTool: Cobertura
+        summaryFileLocation: '$(System.DefaultWorkingDirectory)/coverage.xml'
+        reportDirectory: '$(System.DefaultWorkingDirectory)/htmlcov'
+
+  - job: Publish
+    pool:
+      vmImage: 'ubuntu-latest'
+    strategy:
+      matrix:
+        Python38:
+          python.version: '3.8'
+    dependsOn:
+      - Build
+      - Test
+    #condition: and(succeeded('Test'), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
+    steps:
+    - checkout: none
+
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '$(python.version)'
+      displayName: 'Use Python $(python.version)'
+
+    - task: DownloadBuildArtifacts@0
+      displayName: 'Download Python Wheel'
+      inputs:
+        artifactName: PythonWheel
+        downloadPath: $(System.DefaultWorkingDirectory)/dist
+
+    - task: DownloadBuildArtifacts@0
+      displayName: 'Download requirements.txt'
+      inputs:
+        artifactName: PackageRequirements
+        downloadPath: $(System.DefaultWorkingDirectory)/requirements.txt
+
+    - task: DownloadBuildArtifacts@0
+      displayName: 'Download Documentation'
+      inputs:
+        artifactName: Documentation
+        downloadPath: $(System.DefaultWorkingDirectory)/docs/build
+
+    - script: |
+        python -m pip install --upgrade pip
+        python -m pip install twine
+        python -m pip install wheel
+
+      displayName: 'Install dependencies for version $(python.version)'
+    - task: TwineAuthenticate@1
+      inputs:
+        pythonUploadServiceConnection: 'pypi-restio'
+
+    - script: |
+        python -m twine upload -r 'pypi-restio' --config-file $(PYPIRC_PATH) dist/*.whl
+      displayName: "Publish to PyPI"
