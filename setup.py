@@ -4,7 +4,6 @@ import restio
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
-read_the_docs_url = "https://restio.readthedocs.io/en/latest"
 git_url = "https://github.com/eduardostarling/restio.git"
 
 setuptools.setup(
@@ -23,8 +22,7 @@ setuptools.setup(
         "Operating System :: OS Independent",
     ],
     project_urls={
-        "Documentation": read_the_docs_url,
-        "Source Code": git_url,
+        "Source Code": git_url
     },
     python_requires='>=3.7'
 )
