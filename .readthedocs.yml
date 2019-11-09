@@ -6,9 +6,9 @@ sphinx:
 python:
   version: 3.7
   install:
-    - pipfile: .
-      path: .
-      skip_lock: true
-      dev: true
     - method: setuptools
       path: .
+    - method: pip
+      path: .
+      extra_requirements:
+        - m2r
