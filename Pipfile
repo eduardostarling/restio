@@ -26,4 +26,4 @@ restio = {editable = true,path = "."}
 [scripts]
 test = "python tests/test.py"
 docs = "sphinx-build -b html docs/source docs/build"
-build = "python setup.py bdist_wheel"
+build = "python setup.py sdist bdist_wheel"
