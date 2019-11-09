@@ -73,12 +73,6 @@ jobs:
       displayName: 'Use Python $(python.version)'
 
     - task: DownloadBuildArtifacts@0
-      displayName: 'Download Python Wheel'
-      inputs:
-        artifactName: PythonWheel
-        downloadPath: $(System.DefaultWorkingDirectory)
-
-    - task: DownloadBuildArtifacts@0
       displayName: 'Download requirements.txt'
       inputs:
         artifactName: PackageRequirements
@@ -86,7 +80,6 @@ jobs:
 
     - script: |
         python -m pip install --upgrade pip
-        python -m pip install --use-wheel --no-index --find-links=PythonWheel/dist restio
         python -m pip install -r PackageRequirements/requirements.txt
       displayName: 'Install dependencies for version $(python.version)'
 
@@ -148,5 +141,5 @@ jobs:
         pythonUploadServiceConnection: 'pypi-restio'
 
     - script: |
-        python -m twine upload -r 'pypi-restio' --config-file $(PYPIRC_PATH) $(System.DefaultWorkingDirectory)/PythonWheel/dist/*.whl
+        python -m twine upload -r 'pypi-restio' --config-file $(PYPIRC_PATH) PythonWheel/*.whl
       displayName: "Publish to PyPI"
