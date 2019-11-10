@@ -513,6 +513,8 @@ class Transaction:
 
         # processed models are persisted into cache
         for model in all_processed_models:
+            # TODO: add event to detect changes on primary keys and
+            # propagate the values back into the model cache for remapping
             model._persist()
             model._state = ModelStateMachine.transition(Transition.PERSIST_OBJECT, model._state)
 
