@@ -4,7 +4,6 @@ import asyncio
 import itertools
 from random import randint
 from typing import List, Optional, Tuple
-from uuid import uuid4
 
 import pytest
 
@@ -352,6 +351,26 @@ class TestTransaction:
         assert await t.get(ModelA, 1) == a
         assert await t.get(ModelA, 2) == b
         assert await t.get(ModelA, 3) == c
+
+    @pytest.mark.asyncio
+    async def test_query_with_existing_models(self, t, models):
+        global caller
+        a, *_ = models
+
+        q = SimpleQuery(self)
+        new_value = "new value to check query and model caches"
+        a.s = new_value
+
+        # value now exists in cache before the query is executed
+        t.register_model(a)
+        model_cached_a = await t.get(ModelA, 1)
+
+        caller = "BeforeCache"
+        q_result = await t.query(q)
+
+        # previous value cached should be the one returned
+        assert model_cached_a in q_result
+        assert model_cached_a.s == new_value
 
     @pytest.mark.asyncio
     async def test_empty_query(self, t):
