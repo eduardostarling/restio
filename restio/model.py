@@ -335,6 +335,10 @@ class BaseModel(Generic[T], metaclass=BaseModelMeta):
     def __hash__(self):
         return hash(str(self._internal_id))
 
+    # TODO: internal mutable fields (lists and sets) are not affected
+    # by this interception, therefore the call to self._update will
+    # not happen - we should figure out a way to trigger self._update
+    # in those cases
     def __setattr__(self, name, value):
         if name in self._class_primary_keys:
             if not isinstance(value, PrimaryKey):

@@ -255,7 +255,7 @@ class TestTransaction:
         query = EmptyQuery(self)
 
         t.register_model(a)
-        t.register_query(query, await query(t))
+        await t.register_query(query, await query(t))
 
         assert await t.get(ModelA, 1) == a
         assert await t.query(query) == []
