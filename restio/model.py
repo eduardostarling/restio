@@ -252,7 +252,7 @@ class BaseModel(Generic[T], metaclass=BaseModelMeta):
         """
         Returns the list of all children of the current model. This algorithm checks in
         runtime for all objects refered by the instance, whether directly, through a list
-        or a set. When `recursive` is True, then the algorith will recursively search through
+        or a set. When `recursive` is True, then the algorithm will recursively search through
         all children. `children` and `top_level` are control variables that indicate which
         models have already been inspected by this function, in order to avoid infinite
         recursion if any circular dependency exists.

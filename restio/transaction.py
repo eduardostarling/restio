@@ -217,9 +217,7 @@ class Transaction:
 
         self._register_model(model, force, register_children)
 
-    # TODO: review registering and retrieving of queried models when
-    # some are already stored in model cache
-    def register_query(
+    async def register_query(
         self, query: BaseQuery, models: List[BaseModel], force: bool = False, register_children: bool = True
     ):
         """
@@ -236,10 +234,17 @@ class Transaction:
         :raises RuntimeError: When `register_children` is False and a child
                               of the model is not registered.
         """
-        self._query_cache.register(query, models)
+        registered_models: List[BaseModel] = []
 
         for model in models:
             self._register_model(model, force, register_children)
+            # assuming the previous
+            registered_model = await self.get(type(model), model.get_keys())
+
+            if registered_model:
+                registered_models.append(registered_model)
+
+        self._query_cache.register(query, registered_models)
 
     @overload
     async def get(self, model_type: Type[BaseModel], value: Tuple[ValueKey, ...]) -> Optional[BaseModel]:
@@ -367,10 +372,20 @@ class Transaction:
         """
         Runs custom query `query` and registers results on local cache.
 
+        When new queries are run for the first time, the results are
+        persisted into the query and model caches. Models that already
+        exist in cache (by checking their primary keys) are not registered
+        again (even if `force` = True), to preserve the information
+        already stored and avoid discrepancies on the business level.
+
+        The returning values from the query will contain only the models
+        that are registered in the cache. Discarded models are replaced
+        with their cached version.
+
         :param query: The query instance to be executed.
         :param force: Forces running the query even if it has been
                       already cached.
-        :return: The list of models retrieved from the query.
+        :return: The list of models retrieved by the query.
         """
         if not force:
             cached_results = self._query_cache.get(query)
@@ -378,8 +393,18 @@ class Transaction:
                 return cached_results
 
         results = await query(self)
-        self.register_query(query, results, force=False)
-        return results
+        await self.register_query(query, results, force=False)
+
+        # Registering the cache above without forcing the values
+        # into the model cache might cause double instances of the
+        # same model to exist (one from the incoming query, and one
+        # previously registered by another query or a get). Therefore,
+        # results from the query should updated to return the
+        # combination between new results from the current query and
+        # old results coming from the cache. As this is already handled
+        # by register_query, all we need to do is to retrieve the final
+        # values stored for the query in cache
+        return self._query_cache.get(query)
 
     def _get_models_by_state(self, state: ModelState, models: Optional[Set[BaseModel]] = None):
         models = self._model_cache.get_all_models() if not models else models

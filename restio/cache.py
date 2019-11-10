@@ -136,7 +136,7 @@ class QueryCache:
         self._cache = {}
 
     def register(self, obj: BaseQuery, results: List[BaseModel], force: bool = False) -> bool:
-        """Register a query in cache.
+        """Registers a query in cache.
 
         :param obj: The query instance.
         :param results: The list of results from the query.
@@ -153,7 +153,7 @@ class QueryCache:
         if not force:
             cached = self.get(h)
 
-        if not cached and results:
+        if not cached:
             self._cache[h] = results
             return True
 
