@@ -2,7 +2,7 @@
 
 > NOTICE: Some of the terms utilized in this page are described under [the framework description page](FRAMEWORK.md). Please refer to it before proceeding.
 
-This page explains the internal mechanisms of *restio*, and explains some of the design decisions made during implementation. In general, most (if not all) of the items below are managed by **Transaction** instances separately:
+This page explains the internal mechanisms of *restio*, and describes some of the design decisions made during implementation. In general, most of the items below are managed by **Transaction** instances separately:
 
 - Model uniqueness
 - Caching
@@ -70,4 +70,40 @@ On the BLL, the developer will most likely only need to access the regular field
 
 ## Commit and Rollback
 
-TODO
+Commit and Rollback rely on the state of each model for decision making. Below, a description of how they work.
+
+### Commit
+
+Models are persisted to the remote data store during `commit`. The **Transaction** will try to schedule as many `asyncio` tasks as possible to optimize the calls to the remote server - this is done to reduce the total time to commit all models.
+
+The logic for deciding the order in which models are persisted is the following:
+
+1. Models are filtered in three groups according to their stat (`NEW`, `DIRTY` and `DELETED`).
+
+2. The models in any of the graphs are inspected to make sure there is one DAO associated to each model. There is no check for DAO function overriding.
+
+3. Models on the third graph are inspected one-by-one. If any of these models contain at least one cached parent pointing to it that will still be persisted on the remote data store (in other words, parents that will not be deleted), then the commit is interrupted.
+
+4. Three dependencies graphs are drawn. The first graph include only models with state `NEW`, the second only with models with state `DIRTY` and the third only with models with state `DELETED`. On all graphs, the parents of a model are the models referring to it, while the children are the models referred by it.
+
+5. The graphs are processed in order. The trees in `NEW` and `DIRTY` graphs are traversed from top to bottom (parents to children), while in the `DELETED` graph the trees are traversed from bottom to top (children to parents). All operations from one graph need to be finalized so the next graph can be processed. Operations within each graph are optimized as follows:
+
+  - All trees in a graph are processed in parallel in the `asyncio` event loop.
+  - Each group of nodes are scheduled in parallel in the `asyncio` event loop.
+  - As soon as a node is processed, the next node(s) is (are) scheduled to be persisted if the tree structure   allows (that means, if all children of a particular node have been processed, that node can be processed).   Otherwise, the processor awaits until a new node is processed, and the inspection for a new node restarts.
+  - If an error occurs, the processing will bexception_queuee conditioned to the `PersistencyStrategy` defined for the   transaction. This should be set per transaction scope and the choice might vary according to the use case:
+    - `INTERRUPT_ON_ERROR` will cause the commit to interrupt the scheduling of new nodes and will wait until current processes finalize.
+    - `CONTINUE_ON_ERROR` will cause the commit to ignore the error messages and continue processing all available nodes.
+  - Models that have been persisted on the remote will be also persisted on the local cache, while models not   processed or processed with error are not persisted on cache. This behavior does not depend on the   `PersistencyStrategy`. Models that have been deleted will be discarded from cache.
+
+6. If any error occured, a `TransactionError` will be thrown containing a queue with all errors caught, and a   queue with all models that have been processed correctly.
+
+### Rollback
+
+Rollbacks do not affect the data on the remote data store. The term is here used for rolling back changes on the internal cache that have not yet been persisted on the remote. This is particularly useful if a certain business rule is violated but the developer still wants to utilize the values from the cache without requesting for the whole data again.
+
+Rolling back will behave as follows:
+
+- Models marked as `NEW` and `DELETED` will be marked as `DISCARDED`.
+- Models marked as `DIRTY` will be reverted to `CLEAN` and the persistent internal values recovered.
+- All `DISCARDED` models are removed from the cache.
