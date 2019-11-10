@@ -164,3 +164,9 @@ await t.commit()
 ```
 
 The *commit* method will inspect all models stored on the transaction's internal cache and verify which models should be modified. Its is not up to the BLL anymore to figure out in which order the operations need to be persisted on the remote server, and which models are unchanged. The transaction will take care of drawing the graph of dependencies between models and trigger all requests to the remote REST API accordingly.
+
+# More information
+
+The page [Strategies](STRATEGIES.md) contains important information about the internals of *restio*. Please read this page if you consider using this framework in production.
+
+For other examples, please refer to the [examples](examples/) folder.
