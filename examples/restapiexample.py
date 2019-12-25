@@ -7,7 +7,7 @@ from typing import List, Optional, Tuple
 import requests
 
 from restio.dao import BaseDAO
-from restio.model import BaseModel, PrimaryKey, mdataclass, pk
+from restio.model import BaseModel, PrimaryKey, mdataclass
 from restio.query import query
 from restio.transaction import Transaction
 
@@ -44,7 +44,7 @@ class ClientAPI:
 
 @mdataclass
 class Employee(BaseModel):
-    id: PrimaryKey[int] = pk(int)
+    id: PrimaryKey[int] = PrimaryKey(int)
     name: str = ""
     age: int = 0
     salary: float = 0.0

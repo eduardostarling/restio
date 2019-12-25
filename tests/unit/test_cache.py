@@ -3,13 +3,13 @@ from typing import List
 import pytest
 
 from restio.cache import ModelCache, QueryCache
-from restio.model import BaseModel, PrimaryKey, mdataclass, pk
+from restio.model import BaseModel, PrimaryKey, mdataclass
 from restio.query import query
 
 
 @mdataclass
 class Model(BaseModel):
-    id: PrimaryKey[int] = pk(int)
+    id: PrimaryKey[int] = PrimaryKey(int)
 
 
 @query

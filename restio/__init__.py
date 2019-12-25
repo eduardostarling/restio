@@ -2,7 +2,7 @@ from .cache import ModelCache, QueryCache
 from .dao import BaseDAO
 from .event import EventListener
 from .graph import DependencyGraph, Node, Tree
-from .model import BaseModel, PrimaryKey, pk
+from .model import BaseModel, PrimaryKey
 from .query import BaseQuery, query
 from .state import ModelState, ModelStateMachine, Transition
 from .transaction import (Transaction, TransactionError,
@@ -18,6 +18,5 @@ __all__ = [
     'Transaction',
     'ModelState',
     'PrimaryKey',
-    'pk',
     'query'
 ]

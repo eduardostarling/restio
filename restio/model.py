@@ -1,31 +1,18 @@
 from __future__ import annotations
 
-from dataclasses import Field, dataclass, field, is_dataclass
-from typing import (Any, ClassVar, Dict, ForwardRef, Generic, List, Optional,
-                    Set, Tuple, Type, TypeVar, Union)
+import types
+from dataclasses import dataclass
+from functools import wraps
+from typing import (Any, Dict, Generic, List, Optional, Set, Tuple, Type,
+                    TypeVar, Union)
 from uuid import UUID, uuid4
 
 from .event import EventListener
 from .state import ModelState
 
-
-class _DefaultPrimaryKey:
-    def __eq__(self, value):
-        if isinstance(value, _DefaultPrimaryKey) or value is None:
-            return True
-        return False
-
-    def __hash__(self):
-        return hash(None)
+T = TypeVar('T', int, str, None)
 
 
-DefaultPrimaryKey = _DefaultPrimaryKey()
-
-
-T = TypeVar('T', int, str, _DefaultPrimaryKey)
-
-
-# TODO: Replace the current usage of PrimaryKey for the Descriptor Pattern
 class PrimaryKey(Generic[T]):
     """
     Represents a primary key in a remote model, in a similar fashion as if
@@ -37,17 +24,19 @@ class PrimaryKey(Generic[T]):
     Each PrimaryKey is a generic type and should explicitly indicate the type
     during declaration in a BaseModel.
     """
-    value: T
+    name: str
     _type: Type[T]
 
-    def __init__(self, key_type: Type[T], value: T = DefaultPrimaryKey) -> None:
+    def __init__(self, key_type: Type[T], **kwargs) -> None:
         if key_type not in T.__constraints__:  # type: ignore
             raise TypeError(f"Provided type {key_type.__name__} is not allowed.")
 
         self._type = key_type
-        self.set(value)
 
-    def set(self, value: T):
+    def __set_name__(self, owner, name: str):
+        self.name = name
+
+    def __set__(self, instance, value: T):
         """
         Sets the value of the PrimaryKey.
 
@@ -55,30 +44,28 @@ class PrimaryKey(Generic[T]):
         :raises RuntimeError: If `value` is not of the type T specified during
                               the declaration of the instance.
         """
-        if value is not DefaultPrimaryKey and not issubclass(type(value), self._type):
+        if isinstance(value, PrimaryKey):
+            value = None
+
+        if value and not isinstance(value, self._type):
             raise RuntimeError(f"Primary key value must be of type {self._type.__name__}")
 
-        self.value = value
+        instance.__dict__[self.name] = value
 
-    def get(self) -> T:
+    def __get__(self, instance, owner) -> Union[T, PrimaryKey[T]]:
         """
         Returns the value stored by the PrimaryKey.
 
         :return: The value stored by the instance.
         """
-        return self.value
 
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, PrimaryKey):
-            return issubclass(other._type, self._type) and other.value == self.value
-        else:
-            return issubclass(type(other), self._type) and other == self.value
+        if instance is None:
+            return self
 
-    def __hash__(self):
-        return hash((self._type, self.value))
+        return instance.__dict__.setdefault(self.name, None)
 
 
-ValueKey = Union[T, PrimaryKey]
+ValueKey = Union[T, PrimaryKey[T]]
 """
 Represents the Union of a PrimaryKey or the value stored by it.
 """
@@ -90,18 +77,19 @@ def mdataclass(*args, **kwargs):
     BaseModel are dataclasses constructed with the proper configuration.
     """
     kwargs['eq'] = kwargs.get('eq', False)
-    return dataclass(*args, **kwargs)
 
+    def init_wrapper(init_method):
+        @wraps(init_method)
+        def init_func(self: BaseModel, *margs, **mkwargs):
+            self.pre_setup_model()
+            init_method(self, *margs, **mkwargs)
+            self.post_setup_model()
+        return init_func
 
-def pk(key_type: Type[T], default_value: T = DefaultPrimaryKey, **kwargs) -> Field:
-    """
-    dataclasses.field() initializer for PrimaryKeys in subclasses of BaseModel.
+    model_class = dataclass(*args, **kwargs)
+    model_class.__init__ = init_wrapper(model_class.__init__)
 
-    :param key_type: The type stored by the PrimaryKey.
-    :param default_value: The key initial value, defaults to DefaultPrimaryKey
-    :return: A dataclasses.Field instance.
-    """
-    return field(default_factory=lambda: PrimaryKey(key_type, default_value), **kwargs)
+    return model_class
 
 
 class BaseModelMeta(type):
@@ -116,54 +104,30 @@ class BaseModelMeta(type):
     def __new__(cls, name, bases, dct):
         x: BaseModel = super().__new__(cls, name, bases, dct)
 
-        if name == 'BaseModel' or is_dataclass(x):
-            x._class_primary_keys = {}
-            x._class_typed_fields = {}
-            x._class_mutable = set()
-            x._class_immutable = set()
+        x._class_primary_keys = {}
+        x._class_mutable = set()
+        x._class_immutable = set()
 
-            for base in bases:
-                if is_dataclass(base):
-                    try:
-                        x._class_primary_keys.update(base._class_primary_keys)
-                        x._class_typed_fields.update(base._class_typed_fields)
-                        x._class_immutable.update(base._class_immutable)
-                    except Exception:
-                        pass
-
-            ann = dct.get('__annotations__', [])
-            for field_name, field_type in ann.items():
-                if field_name.startswith('_'):
-                    x._class_immutable.add(field_name)
-                else:
-                    field_type = cls.evaluate_type(field_type)
-                    if cls.is_primary_key(field_type):
-                        x._class_primary_keys.update({field_name: cls.primary_key_type(field_type)})
-                    else:
-                        x._class_typed_fields.update({field_name: field_type})
-
-            mutable = (set(x._class_primary_keys.keys()) | set(x._class_typed_fields.keys())) - set(x._class_immutable)
-            x._class_mutable = mutable
-
-        return x
-
-    @classmethod
-    def evaluate_type(cls, field_type):
-        if isinstance(field_type, str):
+        for base in bases:
             try:
-                return ForwardRef(field_type, is_argument=False)._evaluate(globals(), locals())
+                x._class_primary_keys.update(base._class_primary_keys)
+                x._class_immutable.update(base._class_immutable)
             except Exception:
                 pass
 
-        return field_type
+        for field_name, field_value in dct.items():
+            if isinstance(field_value, types.FunctionType) or \
+               field_name.startswith('__'):
+                continue
 
-    @classmethod
-    def is_primary_key(cls, field_type):
-        return hasattr(field_type, '__origin__') and field_type.__origin__ is PrimaryKey
+            if field_name.startswith('_'):
+                x._class_immutable.add(field_name)
+            else:
+                if isinstance(field_value, PrimaryKey):
+                    x._class_primary_keys.update({field_name: field_value._type})
+                x._class_mutable.add(field_name)
 
-    @classmethod
-    def primary_key_type(cls, field_type):
-        return field_type.__args__[0]
+        return x
 
 
 MODEL_UPDATE_EVENT = "__updated__"
@@ -173,7 +137,6 @@ MODEL_UPDATE_EVENT = "__updated__"
 # classes to allow non-default fields on child models. For more information, see
 # https://stackoverflow.com/questions/51575931/class-inheritance-in-python-3-7-dataclasses
 
-@mdataclass
 class BaseModel(Generic[T], metaclass=BaseModelMeta):
     """
     A representation of a remote object model into a restio.Transaction object.
@@ -206,7 +169,7 @@ class BaseModel(Generic[T], metaclass=BaseModelMeta):
 
     @mdataclass
     class Person(BaseModel):
-        id: PrimaryKey[int] = pk(int)
+        id: PrimaryKey[int] = PrimaryKey(int)
         name: str = ""
         age: int = 0
 
@@ -214,21 +177,31 @@ class BaseModel(Generic[T], metaclass=BaseModelMeta):
     print(m)  # Person(id=1, name="Bob", age=10)
 
     """
-    _class_primary_keys: ClassVar[Dict[str, type]]
-    _class_typed_fields: ClassVar[Dict[str, type]]
-    _class_mutable: ClassVar[Set[str]]
-    _class_immutable: ClassVar[Set[str]]
+    _class_primary_keys: Dict[str, type]
+    _class_mutable: Set[str]
+    _class_immutable: Set[str]
 
-    _internal_id: UUID = field(default_factory=uuid4)
-    _state: ModelState = field(init=False, repr=False, compare=False, hash=False, default=ModelState.CLEAN)
-    _persistent_values: Dict[str, Any] = field(init=False, repr=False, compare=False, hash=False, default_factory=dict)
-    _primary_keys: Tuple[Optional[T], ...] = field(repr=False, init=False, compare=False, hash=False)
-    _listener: EventListener = field(repr=False, init=False, compare=False, hash=False, default_factory=EventListener)
-    _initialized: bool = field(repr=False, init=False, compare=False, hash=False, default=False)
+    _internal_id: UUID
+    _state: ModelState
+    _persistent_values: Dict[str, Any]
+    _primary_keys: Tuple[Optional[T], ...]
+    _listener: EventListener
+    _initialized: bool
 
-    def __post_init__(self):
-        self._initialized = True
+    def __init__(self):
+        self.pre_setup_model()
+        self.post_setup_model()
+
+    def pre_setup_model(self):
+        self._initialized = False
+        self._internal_id = uuid4()
+        self._persistent_values = {}
+        self._listener = EventListener()
+
+    def post_setup_model(self):
+        self._state = ModelState.CLEAN
         self._primary_keys = self._get_primary_keys()
+        self._initialized = True
 
     def _get_primary_keys(self) -> Tuple[Optional[T], ...]:
         return tuple([
@@ -340,34 +313,10 @@ class BaseModel(Generic[T], metaclass=BaseModelMeta):
     # not happen - we should figure out a way to trigger self._update
     # in those cases
     def __setattr__(self, name, value):
+        if name in self._class_mutable:
+            self._update(name, value)
+
+        super().__setattr__(name, value)
+
         if name in self._class_primary_keys:
-            if not isinstance(value, PrimaryKey):
-                key_type = self._class_primary_keys[name]
-                value = PrimaryKey(key_type, value)
-
-            self._update(name, value)
-            super().__setattr__(name, value)
-
-            if self._initialized:
-                self._primary_keys = self._get_primary_keys()
-
-        elif name in self._class_mutable:
-            self._update(name, value)
-            super().__setattr__(name, value)
-        else:
-            super().__setattr__(name, value)
-
-    def __getattribute__(self, name):
-        initialized = object.__getattribute__(self, '_initialized')
-
-        if initialized:
-            cls = object.__getattribute__(self, '__class__')
-            if name in cls._class_primary_keys:
-                key_attr = super().__getattribute__(name)
-
-                if isinstance(key_attr, PrimaryKey):
-                    return key_attr.get()
-                else:
-                    return key_attr
-
-        return super().__getattribute__(name)
+            self._primary_keys = self._get_primary_keys()
