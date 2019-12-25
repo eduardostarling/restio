@@ -406,22 +406,24 @@ class Transaction:
         # values stored for the query in cache
         return self._query_cache.get(query)
 
-    def _get_models_by_state(self, state: ModelState, models: Optional[Set[BaseModel]] = None):
+    def _get_models_by_state(self, state: Tuple[ModelState], models: Optional[Set[BaseModel]] = None):
         models = self._model_cache.get_all_models() if not models else models
-        return set([model for model in models if model._state == state])
+        return set([model for model in models if model._state in state])
 
     def _get_models_to_add(self, models: Optional[Set[BaseModel]] = None) -> Set[BaseModel]:
-        return self._get_models_by_state(ModelState.NEW, models)
+        return self._get_models_by_state((ModelState.NEW,), models)
 
     def _get_models_to_update(self, models: Optional[Set[BaseModel]] = None) -> Set[BaseModel]:
-        return self._get_models_by_state(ModelState.DIRTY, models)
+        return self._get_models_by_state((ModelState.DIRTY,), models)
 
     def _get_models_to_remove(self, models: Optional[Set[BaseModel]] = None) -> Set[BaseModel]:
-        return self._get_models_by_state(ModelState.DELETED, models)
+        return self._get_models_by_state((ModelState.DELETED,), models)
+
+    def _get_processed_models(self, models: Optional[Set[BaseModel]] = None) -> Set[BaseModel]:
+        return self._get_models_by_state((ModelState.CLEAN, ModelState.DISCARDED), models)
 
     def get_transaction_models(self, models: Optional[Set[BaseModel]] = None) -> Set[BaseModel]:
-        models = set(self._model_cache._id_cache.values()) if not models else models
-        return set([model for model in models if model._state not in (ModelState.CLEAN, ModelState.DISCARDED)])
+        return self._get_models_by_state((ModelState.NEW, ModelState.DIRTY, ModelState.DELETED), models)
 
     def _check_deleted_models(self, models: Optional[Set[BaseModel]] = None):
         models = set(self._model_cache._id_cache.values()) if not models else models
@@ -486,6 +488,7 @@ class Transaction:
             for model in discarded_models:
                 self._model_cache.unregister(model)
                 self._unsubscribe_update(model)
+            self.update_cache()
 
     async def _process_all_graphs(self, graphs: List[DependencyGraph], directions: List[NavigationDirection]):
         all_processed_models: Deque[BaseModel] = deque()
@@ -617,3 +620,8 @@ class Transaction:
                 self._unsubscribe_update(model)
             else:
                 model._rollback()
+
+    def update_cache(self):
+        models = self._get_processed_models()
+        for model in models:
+            self._model_cache.register(model, force=True)

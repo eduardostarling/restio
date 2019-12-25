@@ -111,7 +111,7 @@ class TestModelCache:
         m.id = 1
 
         cache.register(m)
-        first_ref = cache.get_by_internal_id(Model, m._internal_id)
+        first_ref = cache.get_by_primary_key(Model, (m.id,))
 
         assert first_ref == m
 
