@@ -469,12 +469,39 @@ class TestTransaction:
         assert cached_a._persistent_values == {}
 
     @pytest.mark.asyncio
-    async def test_update_primary_key(self, t, models):
+    async def test_commit_new_primary_key(self, t, models):
         a, _, _ = models
+        old_key = a.key
+
+        class ModelADAO(BaseDAO):
+            async def get(self, obj: Tuple[ValueKey]):
+                if obj[0] == old_key:
+                    return None
+                else:
+                    raise ValueError(
+                        "Request using the new key did not return from cache.")
+
+            async def update(self, obj):
+                pass
+
+        t.register_dao(ModelADAO(ModelA))
         t.register_model(a)
 
         a.key = 11
-        print(a)
+        # try getting the model by its old key
+        cached_a = await t.get(ModelA, old_key)
+        assert cached_a == a
+
+        # the commit should always remap the primary keys
+        await t.commit()
+        # this should return None
+        wrong_cached_a = await t.get(ModelA, old_key)
+        # this should return the model from the cache
+        correct_cached_a = await t.get(ModelA, a.key)
+
+        assert not wrong_cached_a
+        assert correct_cached_a == a
+
 
     @pytest.mark.asyncio
     async def test_remove(self, t, models):

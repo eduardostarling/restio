@@ -133,10 +133,6 @@ class BaseModelMeta(type):
 MODEL_UPDATE_EVENT = "__updated__"
 
 
-# TODO: break down the default and non-default fields in BaseModel into two separate
-# classes to allow non-default fields on child models. For more information, see
-# https://stackoverflow.com/questions/51575931/class-inheritance-in-python-3-7-dataclasses
-
 class BaseModel(Generic[T], metaclass=BaseModelMeta):
     """
     A representation of a remote object model into a restio.Transaction object.
@@ -283,7 +279,6 @@ class BaseModel(Generic[T], metaclass=BaseModelMeta):
         by the party that persisted the values on the remote server.
         """
         self._persistent_values = {}
-        self._primary_keys = self._get_primary_keys()
 
     def _update(self, name, value):
         if not self._initialized:
