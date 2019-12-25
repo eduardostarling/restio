@@ -9,7 +9,7 @@ import pytest
 
 from restio.dao import BaseDAO
 from restio.graph import DependencyGraph, NavigationDirection
-from restio.model import BaseModel, PrimaryKey, ValueKey, mdataclass, pk
+from restio.model import BaseModel, PrimaryKey, ValueKey, mdataclass
 from restio.query import query
 from restio.state import ModelState
 from restio.transaction import (PersistencyStrategy, Transaction,
@@ -20,7 +20,7 @@ caller = None
 
 @mdataclass
 class ModelA(BaseModel):
-    key: PrimaryKey[int] = pk(int)
+    key: PrimaryKey[int] = PrimaryKey(int)
     v: int = 0
     s: str = ""
     ex: bool = False
@@ -467,6 +467,14 @@ class TestTransaction:
         assert cached_a._state == ModelState.NEW
         assert cached_a.v == 100
         assert cached_a._persistent_values == {}
+
+    @pytest.mark.asyncio
+    async def test_update_primary_key(self, t, models):
+        a, _, _ = models
+        t.register_model(a)
+
+        a.key = 11
+        print(a)
 
     @pytest.mark.asyncio
     async def test_remove(self, t, models):

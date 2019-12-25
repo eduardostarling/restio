@@ -7,7 +7,7 @@ The **restio** framework is composed by a few building blocks:
 - Data Access Object
 - Transaction
 
-On high level, Transactions are supposed to coordinate contexts of operations on a remote REST API. Transactions benefit from the relationship between Data Access Object's and Models to decide how models are persisted on the remote server.
+On high level, Transactions are supposed to coordinate contexts of operations on a remote REST API. Transactions benefit from the relationship between Data Access Objects and Models to decide how models are persisted on the remote server.
 
 Below, a you will find more detailed explanations of each module and how we can connect them together.
 
@@ -18,11 +18,11 @@ A model is a representation of a real world object in software context. All mode
 For example, a model **_Person_** could be written using as following to represent a Person stored in a remote REST API:
 
 ```python
-from restio import BaseModel, mdataclass, PrimaryKey, pk
+from restio import BaseModel, mdataclass, PrimaryKey
 
 @mdataclass
 class Person(BaseModel):
-    id: PrimaryKey[int] = pk(int)
+    id: PrimaryKey[int] = PrimaryKey(int)
     name: str = ""
     age: int = 0
     address: str = ""
@@ -46,7 +46,7 @@ from typing import Set
 
 @mdataclass
 class Company(BaseModel):
-    name: PrimaryKey[str] = pk(str)
+    name: PrimaryKey[str] = PrimaryKey(str)
     employees: Set[Person] = field(default_factory=frozenset)
 
     def hire_employee(self, employee: Person):

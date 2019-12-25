@@ -2,35 +2,34 @@ from typing import List, Optional
 
 import pytest
 
-from restio.model import (BaseModel, DefaultPrimaryKey, PrimaryKey, mdataclass,
-                          pk)
+from restio.model import BaseModel, PrimaryKey, mdataclass
 
 
 @mdataclass
 class ModelSinglePKInt(BaseModel):
-    id: PrimaryKey[int] = pk(int)
+    id: PrimaryKey[int] = PrimaryKey(int)
 
 
 @mdataclass
 class ModelSinglePKStr(BaseModel):
-    id: PrimaryKey[str] = pk(str)
+    id: PrimaryKey[str] = PrimaryKey(str)
 
 
 @mdataclass
 class ModelDoublePKIntStr(BaseModel):
-    id: PrimaryKey[int] = pk(int)
-    key: PrimaryKey[str] = pk(str)
+    id: PrimaryKey[int] = PrimaryKey(int)
+    key: PrimaryKey[str] = PrimaryKey(str)
 
 
 @mdataclass
 class ModelDoublePKStrInt(BaseModel):
-    key: PrimaryKey[str] = pk(str)
-    id: PrimaryKey[int] = pk(int)
+    key: PrimaryKey[str] = PrimaryKey(str)
+    id: PrimaryKey[int] = PrimaryKey(int)
 
 
 @mdataclass
 class ModelA(BaseModel):
-    id: PrimaryKey[int] = pk(int)
+    id: PrimaryKey[int] = PrimaryKey(int)
     a: int = 0
     b: str = ''
 
@@ -55,42 +54,6 @@ class ModelD(BaseModel):
 @mdataclass
 class ModelE(BaseModel):
     ref: Optional[ModelD] = None
-
-
-class TestPrimaryKey:
-
-    def test_equal(self):
-        x = PrimaryKey(int, 1)
-        y = PrimaryKey(str, "2")
-
-        assert x == 1
-        assert x == PrimaryKey(int, 1)
-        assert y == "2"
-        assert y == PrimaryKey(str, "2")
-
-    def test_not_equal(self):
-        x = PrimaryKey(int, 1)
-        y = PrimaryKey(str, "2")
-
-        assert x != 2
-        assert x != PrimaryKey(int, 2)
-        assert x != "1"
-        assert x != PrimaryKey(str, "1")
-        assert y != "1"
-        assert y != PrimaryKey(str, "1")
-        assert y != 2
-        assert y != PrimaryKey(int, 2)
-
-    def test_set(self):
-        x = PrimaryKey(int, 0)
-        type_error = "Primary key value must be of type"
-        assert x.value == 0
-
-        x.set(1)
-        assert x.value == 1
-
-        with pytest.raises(RuntimeError, match=type_error):
-            x.set("1")
 
 
 class TestModel:
@@ -124,7 +87,7 @@ class TestModel:
         return ModelDoublePKStrInt()
 
     def test_primary_key_int(self, single_int):
-        single_int.id = PrimaryKey(int, 1)
+        single_int.id = 1
 
         assert single_int.id == 1
         assert single_int.get_keys() == (1,)
@@ -171,8 +134,8 @@ class TestModel:
     def test_get_mutable(self, a, b):
         assert set(a._class_mutable) == set(['id', 'a', 'b'])
         assert set(b._class_mutable) == set(['ref', 'c'])
-        assert set(a._get_mutable_fields().values()) == set([DefaultPrimaryKey, 1, 'a'])
-        assert set(b._get_mutable_fields().values()) == set([DefaultPrimaryKey, 'b'])
+        assert set(a._get_mutable_fields().values()) == set([None, 1, 'a'])
+        assert set(b._get_mutable_fields().values()) == set([None, 'b'])
 
     def test_modify_mutable(self, a):
         old_value_a, old_value_b = a.a, a.b
