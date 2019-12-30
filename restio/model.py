@@ -74,7 +74,8 @@ Represents the Union of a PrimaryKey or the value stored by it.
 def mdataclass(*args, **kwargs):
     """
     Wrapper around the dataclass() decorator used to guarantee that subclasses of
-    BaseModel are dataclasses constructed with the proper configuration.
+    BaseModel are dataclasses constructed with the proper configuration. Only needed
+    if any of the child classes are intended to be dataclasses.
     """
     kwargs['eq'] = kwargs.get('eq', False)
 
@@ -138,7 +139,8 @@ class BaseModel(Generic[T], metaclass=BaseModelMeta):
     A representation of a remote object model into a restio.Transaction object.
 
     BaseModel is an abstract class that should be extended to represent models incoming
-    from or outgoing to a remote REST API. The subclasses should be mandatorily dataclasses.
+    from or outgoing to a remote REST API. The subclasses can benefit from dataclasses
+    by using the decorator @mdataclass.
 
     Models can exist independently from Transactions but contain an internal state that
     indicates the status of the model within the current context. The transactions are
