@@ -406,7 +406,7 @@ class Transaction:
         # values stored for the query in cache
         return self._query_cache.get(query)
 
-    def _get_models_by_state(self, state: Tuple[ModelState], models: Optional[Set[BaseModel]] = None):
+    def _get_models_by_state(self, state: Tuple[ModelState, ...], models: Optional[Set[BaseModel]] = None):
         models = self._model_cache.get_all_models() if not models else models
         return set([model for model in models if model._state in state])
 
