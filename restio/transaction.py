@@ -29,7 +29,7 @@ class TransactionError(Exception):
     Represents a collection of exceptions raised during the `commit` of a Transaction.
     """
     def __init__(self, errors: Deque[TransactionOperationError], processed_models: Deque[BaseModel]):
-        super().__init__()
+        super().__init__(errors)
         self.errors = errors
         self.models = processed_models
 
