@@ -45,11 +45,7 @@ class ModelCache:
 
         # now removes the existing models when forcing the operation
         if cached and force:
-            if cached_model_id:
-                del self._id_cache[cached_model_id]
-            if cached_model_key:
-                del self._key_cache[cached_model_key]
-
+            self._remove_from_cache(cached_model_id, cached_model_key)
             cached = None
 
         # inserts the model if not in cache at this point
@@ -75,10 +71,7 @@ class ModelCache:
             raise ValueError(f"Object of type `{obj_type.__name__}` and id `{obj_hash}` not found in cache.")
 
         # now remove the cached models
-        if cached_model_id:
-            del self._id_cache[cached_model_id]
-        if cached_model_key:
-            del self._key_cache[cached_model_key]
+        self._remove_from_cache(cached_model_id, cached_model_key)
 
     def _get_type_key_hash(self, obj: BaseModel):
         self._check_object_type(obj)
@@ -154,6 +147,12 @@ class ModelCache:
             if pk is None:
                 return True
         return False
+
+    def _remove_from_cache(self, cached_model_id: Optional[IdCacheKey], cached_model_key: Optional[KeyCacheKey]):
+        if cached_model_id and cached_model_id in self._id_cache:
+            del self._id_cache[cached_model_id]
+        if cached_model_key and cached_model_key in self._key_cache:
+            del self._key_cache[cached_model_key]
 
     def get_by_primary_key(self, model_type: Type[BaseModel], value: Tuple[ValueKey, ...]) -> Optional[BaseModel]:
         """Finds model in cache by its primary key.
