@@ -96,15 +96,15 @@ class ModelCache:
 
         cached_model_id: Optional[IdCacheKey] = None
         cached_model_key: Optional[KeyCacheKey] = None
+        cached: Optional[BaseModel] = None
         key_cached: Optional[BaseModel] = None
 
         # first try to find the models by their keys
-        cached: Optional[BaseModel] = self.get_by_internal_id(obj_type, obj_hash)
+        cached = self.get_by_internal_id(obj_type, obj_hash)
         if cached:
             cached_model_id = (str(obj_type.__name__), str(obj_hash))
 
-        # also try to find the model by its primary key when forcing
-        # a new model (optimization to avoid a second search when necessary)
+        # also try to find the model by its primary key
         if not self._has_empty_pk(obj_pk):
             key_cached = self.get_by_primary_key(obj_type, obj_pk)
             cached = cached or key_cached
@@ -125,9 +125,9 @@ class ModelCache:
     def _search_iterative(self, obj: BaseModel, skip_id_search: bool = False) -> \
             Tuple[Optional[BaseModel], Optional[IdCacheKey], Optional[KeyCacheKey]]:
 
-        cached_model = None
-        model_id = None
-        model_key = None
+        cached_model: Optional[BaseModel] = None
+        model_id: Optional[IdCacheKey] = None
+        model_key: Optional[KeyCacheKey] = None
 
         if not skip_id_search:
             for model_id, model in self._id_cache.items():
