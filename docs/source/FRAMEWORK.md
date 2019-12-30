@@ -34,7 +34,7 @@ class Person(BaseModel):
 
 ```
 
-All models within the framework need to be decorated as [dataclasses](https://docs.python.org/3/library/dataclasses.html). On the example above, we use our own wrapper decorator **mdataclass** that will transform **_Person_** into a dataclass on the background.
+Models within the framework could be decorated as [dataclasses](https://docs.python.org/3/library/dataclasses.html), and this is the recommended approach. On the example above, we use our own wrapper decorator **mdataclass** that will transform **_Person_** into a dataclass on the background. If not using dataclasses, please make sure that the constructor of **BaseModel** is called. All examples in this documentation will use dataclasses to define models.
 
 Naturally, a model on the remote server could contain relationships with other models types. It is possible to replicate that behavior on the client side. For example, if we need to represent a **_Company_** model as a remote object, we could simple extend the code above with the following:
 
