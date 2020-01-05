@@ -7,12 +7,12 @@ from typing import List, Optional, Tuple
 
 import pytest
 
-from restio.dao import BaseDAO
+from restio.dao import BaseDAO, DAOTask
 from restio.graph import DependencyGraph, NavigationDirection
 from restio.model import BaseModel, PrimaryKey, ValueKey, mdataclass
 from restio.query import query
 from restio.state import ModelState
-from restio.transaction import DAOTask, PersistencyStrategy, Transaction
+from restio.transaction import PersistencyStrategy, Transaction
 
 caller = None
 
@@ -152,10 +152,6 @@ class ModelsFixture:
         return models
 
 
-class TestDAOTask(ModelsFixture):
-    pass
-
-
 class TestTransaction(ModelsFixture):
     @pytest.fixture
     def t(self):
@@ -276,6 +272,29 @@ class TestTransaction(ModelsFixture):
             await t.get(ModelA, 1)
 
     @pytest.mark.asyncio
+    async def test_dao_check_add(self, t, models):
+        a, *_ = models
+
+        with pytest.raises(NotImplementedError, match="DAO"):
+            t.add(a)
+
+    @pytest.mark.asyncio
+    async def test_dao_check_remove(self, t, models):
+        a, *_ = models
+
+        t.register_model(a)
+        with pytest.raises(NotImplementedError, match="DAO"):
+            t.remove(a)
+
+    @pytest.mark.asyncio
+    async def test_dao_check_update(self, t, models):
+        a, *_ = models
+
+        t.register_model(a)
+        with pytest.raises(NotImplementedError, match="DAO"):
+            a.v = 200
+
+    @pytest.mark.asyncio
     async def test_get_new(self, t, models):
         a, b, c = models
 
@@ -389,6 +408,7 @@ class TestTransaction(ModelsFixture):
     @pytest.mark.asyncio
     async def test_add(self, t, models):
         a, _, _ = models
+        t.register_dao(ModelDAO(ModelA))
 
         assert t.add(a)
         with pytest.raises(RuntimeError):
@@ -402,6 +422,8 @@ class TestTransaction(ModelsFixture):
     @pytest.mark.asyncio
     async def test_update(self, t, models):
         a, _, _ = models
+        t.register_dao(ModelDAO(ModelA))
+
         old_a_value = a.v
 
         t.register_model(a)
@@ -420,6 +442,8 @@ class TestTransaction(ModelsFixture):
     @pytest.mark.asyncio
     async def test_update_twice(self, t, models):
         a, _, _ = models
+        t.register_dao(ModelDAO(ModelA))
+
         old_a_value = a.v
         old_a_string = a.s
 
@@ -439,6 +463,8 @@ class TestTransaction(ModelsFixture):
     @pytest.mark.asyncio
     async def test_update_to_persistent(self, t, models):
         a, _, _ = models
+        t.register_dao(ModelDAO(ModelA))
+
         old_a_value = a.v
         old_a_string = a.s
 
@@ -459,6 +485,7 @@ class TestTransaction(ModelsFixture):
     @pytest.mark.asyncio
     async def test_update_new(self, t, models):
         a, _, _ = models
+        t.register_dao(ModelDAO(ModelA))
 
         t.add(a)
         cached_a = await t.get(ModelA, 1)
@@ -511,6 +538,7 @@ class TestTransaction(ModelsFixture):
     @pytest.mark.asyncio
     async def test_remove(self, t, models):
         a, _, _ = models
+        t.register_dao(ModelDAO(ModelA))
 
         t.register_model(a)
         cached_a = await t.get(ModelA, 1)
@@ -713,6 +741,7 @@ class TestTransaction(ModelsFixture):
     @pytest.mark.asyncio
     async def test_rollback(self, t, models_complex):
         a, b, c, d, e, f = models = list(models_complex)
+        t.register_dao(ModelDAO(ModelA))
 
         t.register_model(a)
         t.register_model(d)

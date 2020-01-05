@@ -1,5 +1,5 @@
 from .cache import ModelCache, QueryCache
-from .dao import BaseDAO
+from .dao import BaseDAO, DAOTask
 from .event import EventListener
 from .graph import DependencyGraph, Node, Tree
 from .model import BaseModel, PrimaryKey, mdataclass
@@ -17,6 +17,7 @@ __all__ = [
     'Transaction',
     'ModelState',
     'PrimaryKey',
+    'DAOTask'
     'query',
     'mdataclass',
 ]

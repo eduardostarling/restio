@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from enum import IntEnum, auto
 from functools import wraps
-from typing import (AsyncGenerator, AsyncIterator, Callable, Dict, List,
-                    Optional, Set, Tuple, Type, cast, overload)
+from typing import (AsyncGenerator, AsyncIterator, Dict, List, Optional, Set,
+                    Tuple, Type, cast, overload)
 
 from .cache import ModelCache, QueryCache
-from .dao import BaseDAO
+from .dao import (BaseDAO, DAOTask, DAOTaskCallable,
+                  check_dao_implemented_method)
 from .graph import DependencyGraph, NavigationDirection, Node, Tree
-from .model import MODEL_UPDATE_EVENT, BaseModel, ValueKey
+from .model import MODEL_UPDATE_EVENT, BaseModel, ValueKey, _check_model_type
 from .query import BaseQuery
 from .state import ModelState, ModelStateMachine, Transition
 
@@ -53,98 +53,6 @@ class TransactionState(IntEnum):
     GET = auto()
     COMMIT = auto()
     ROLLBACK = auto()
-
-
-DAOTaskCallable = Callable[[], Node]
-
-
-class DAOTask:
-    """
-    Wrapper object that, when awaited, contains a asyncio.Task running a DAO function
-    during a Transaction commit.
-
-    When a DAOTask instance is awaited for the first time, it triggers `run_task()`
-    and returns the result from the undelying task wrapping `func`. Awaiting the same
-    instance multiple times will not retrigger the task, but instead will return the
-    value from the first call. Alternatively, it is also possible to retrieve the underlying
-    task directly through the attribute `task`.
-
-    Running a DAOTask will also record the `start_time` and `end_time` of the first execution.
-    """
-    _task: Optional[asyncio.Task[Node]]
-    node: Node
-    func: DAOTaskCallable
-    start_time: float
-    end_time: float
-
-    def __init__(self, node: Node, func: DAOTaskCallable):
-        self.node = node
-        self.func = func
-        self.start_time = 0.0
-        self.end_time = 0.0
-        self._task = None
-
-    def run_task(self) -> asyncio.Task:
-        """
-        Creates and returns a asyncio.Task that runs `func` when called for the first time.
-        When called multiple times, returns the existing asyncio.Task created during the
-        first execution.
-
-        :return: The asyncio.Task instance.
-        """
-        if self._task:
-            return self._task
-
-        self.start_time = time.time()
-
-        task: asyncio.Task = asyncio.create_task(self.func(self.node.node_object))
-        task.add_done_callback(self._task_finished)
-
-        self._task = task
-        return task
-
-    def __await__(self):
-        return self.run_task().__await__()
-
-    @property
-    def task(self) -> asyncio.Task:
-        """
-        Contains the underlying asyncio.Task.
-
-        :raises RuntimeError: When a Task has not yet been triggered.
-        :return: The asyncio.Task instance.
-        """
-        if not self._task:
-            raise RuntimeError("DAOTask not started.")
-        return self._task
-
-    def _task_finished(self, future):
-        self.end_time = time.time()
-        self.task.remove_done_callback(self._task_finished)
-
-    @property
-    def duration(self) -> float:
-        """
-        Returns the duration of the execution (in seconds).
-
-        :raises RuntimeError: When the execution has not been finished.
-        :return: The duration (in seconds).
-        """
-        if not self.start_time or not self.end_time:
-            raise RuntimeError("Task not finished.")
-        return self.end_time - self.start_time
-
-    @property
-    def model(self) -> BaseModel:
-        """
-        Returns the BaseModel contained by the `node`.
-
-        :return: The BaseModel instance.
-        """
-        return self.node.node_object
-
-    def __lt__(self, value: DAOTask):
-        return self.end_time < value.end_time
 
 
 def transactionstate(state: TransactionState):
@@ -239,13 +147,19 @@ class Transaction:
         if model_type not in self._daos:
             self._daos[model_type] = dao
 
-    def get_dao(self, model_type: Type[BaseModel]) -> Optional[BaseDAO]:
+    def get_dao(self, model_type: Type[BaseModel]) -> BaseDAO:
         """Returns the DAO associated with the `model_type`.
 
         :param model_type: The BaseModel subclass.
-        :return: The DAO instance, if found. None otherwise.
+        :raises RuntimeError: If no DAO has been associated to the provided
+                              `model_type`.
+        :return: The DAO instance, if found.
         """
-        return self._daos.get(model_type)
+        dao = self._daos.get(model_type)
+        if dao is None:
+            raise NotImplementedError(f"Model type `{model_type.__name__}` does not contain a DAO registered.")
+
+        return dao
 
     def _register_model(self, model: BaseModel, force: bool = False, register_children: bool = True):
         self._model_cache.register(model, force)
@@ -357,8 +271,6 @@ class Transaction:
                 return model
 
             dao: BaseDAO = self.get_dao(model_type)
-            if not dao:
-                raise RuntimeError(f"DAO for model type {model_type.__name__} not found for this transaction.")
 
             model = cast(model_type, await dao.get(value))
             if model:
@@ -382,17 +294,20 @@ class Transaction:
         :raises RuntimeError: If the model has been already registered in cache.
         :return: True if the model is scheduled for adding, False otherwise.
         """
-        assert model is not None
+        _check_model_type(model)
+
+        dao = self.get_dao(type(model))
+        check_dao_implemented_method(dao.add)
 
         model_cache = self._model_cache.get_by_internal_id(model.__class__, model._internal_id)
         if model_cache:
-            raise RuntimeError(f"Model of id `{model._internal_id}` is already registered in" " internal cache.")
+            raise RuntimeError(f"Model of id `{model._internal_id}` is already registered in internal cache.")
 
         keys = model.get_keys()
         if keys:
             model_cache = self._model_cache.get_by_primary_key(model.__class__, keys)
             if model_cache:
-                raise RuntimeError(f"Model with keys `{keys}` is already registered in" " internal cache.")
+                raise RuntimeError(f"Model with keys `{keys}` is already registered in internal cache.")
 
         model._state = ModelStateMachine.transition(Transition.ADD_OBJECT, None)
         self._register_model(model, force=False, register_children=False)
@@ -400,7 +315,7 @@ class Transaction:
         return model._state == ModelState.NEW
 
     def _assert_cache_internal_id(self, model: BaseModel) -> BaseModel:
-        assert model is not None
+        _check_model_type(model)
 
         model_cache = self._model_cache.get_by_internal_id(model.__class__, model._internal_id)
         if not model_cache:
@@ -415,6 +330,9 @@ class Transaction:
         :param model: The model instance.
         :return: True if model is scheduled for removal, False otherwise.
         """
+        dao = self.get_dao(type(model))
+        check_dao_implemented_method(dao.remove)
+
         model_cache = self._assert_cache_internal_id(model)
         model_cache._state = ModelStateMachine.transition(Transition.REMOVE_OBJECT, model_cache._state)
 
@@ -437,6 +355,10 @@ class Transaction:
                 new_state = ModelStateMachine.transition(Transition.CLEAN_OBJECT, model._state)
             elif new_state == ModelState.NEW:
                 model._persist()
+
+        if new_state == ModelState.DIRTY:
+            dao = self.get_dao(type(model))
+            check_dao_implemented_method(dao.update)
 
         model._state = new_state
         return updated
@@ -477,7 +399,7 @@ class Transaction:
         # old results coming from the cache. As this is already handled
         # by register_query, all we need to do is to retrieve the final
         # values stored for the query in cache
-        return self._query_cache.get(query)
+        return self._query_cache.get(query)  # type: ignore
 
     def _get_models_by_state(self, state: Tuple[ModelState, ...], models: Optional[Set[BaseModel]] = None):
         models = self._model_cache.get_all_models() if not models else models
@@ -528,14 +450,6 @@ class Transaction:
 
         all_models: Set[BaseModel] = models_to_add.union(models_to_update) \
                                                   .union(models_to_remove)
-
-        # beginning of TODO: optimize by changing architecture
-        # Pre-process to check if all models contain DAO's
-        for model in all_models:
-            dao = self.get_dao(type(model))
-            if dao is None:
-                raise RuntimeError(f"Model of type `{type(model)}` does not contain a DAO.")
-        # end of TODO
 
         self._check_deleted_models(models_to_remove)
 
@@ -678,8 +592,6 @@ class Transaction:
         for node in nodes:
             model = node.node_object
             dao = self.get_dao(type(model))
-            if not dao:
-                raise RuntimeError(f"Model of type `{type(model)}` does not contain DAOs.")
 
             model_callable: DAOTaskCallable
 

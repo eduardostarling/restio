@@ -13,6 +13,11 @@ from .state import ModelState
 T = TypeVar('T', int, str, None)
 
 
+def _check_model_type(obj: Optional[BaseModel]):
+    if not isinstance(obj, BaseModel):
+        raise TypeError("The provided object is not of type BaseModel.")
+
+
 class PrimaryKey(Generic[T]):
     """
     Represents a primary key in a remote model, in a similar fashion as if
