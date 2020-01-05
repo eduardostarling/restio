@@ -1,37 +1,18 @@
+from __future__ import annotations
+
 import asyncio
-from collections import deque
+import time
 from enum import IntEnum, auto
 from functools import wraps
-from typing import (Any, Deque, Dict, List, Optional, Set, Tuple, Type, cast,
-                    overload)
+from typing import (AsyncGenerator, AsyncIterator, Callable, Dict, List,
+                    Optional, Set, Tuple, Type, cast, overload)
 
 from .cache import ModelCache, QueryCache
 from .dao import BaseDAO
-from .graph import (CallbackCoroutineCallable, DependencyGraph,
-                    NavigationDirection, Node, NodeProcessException, Tree,
-                    TreeProcessException)
+from .graph import DependencyGraph, NavigationDirection, Node, Tree
 from .model import MODEL_UPDATE_EVENT, BaseModel, ValueKey
 from .query import BaseQuery
 from .state import ModelState, ModelStateMachine, Transition
-
-
-class TransactionOperationError(Exception):
-    """
-    Represents a single exception during the `commit` of a Transaction.
-    """
-    def __init__(self, error: Exception, model: BaseModel):
-        super().__init__(error)
-        self.model = model
-
-
-class TransactionError(Exception):
-    """
-    Represents a collection of exceptions raised during the `commit` of a Transaction.
-    """
-    def __init__(self, errors: Deque[TransactionOperationError], processed_models: Deque[BaseModel]):
-        super().__init__(errors)
-        self.errors = errors
-        self.models = processed_models
 
 
 class PersistencyStrategy(IntEnum):
@@ -39,20 +20,20 @@ class PersistencyStrategy(IntEnum):
     Defines the strategy of error handling during a Transaction `commit`.
 
     INTERRUPT_ON_ERROR (default):
-        The transaction will be interrupted if any operation with the
-        server throws an exception. The operations already performed
-        will be persisted on local cache. The commit operation will
-        hang until all running tasks finalize, then a TransactionError
-        is thrown, containing the list of all models that have not been
-        persisted on local cache. This is the recommended approach.
+        The transaction will be interrupted if any operation made by
+        a DAO throws an exception. The operations already performed
+        will be persisted on local cache, and the on-going tasks in
+        the other dependency trees will be finalized. The commit
+        operation will hang until all running tasks finalize, then a
+        list of all DAOTask's will be returned by the `commit`. This
+        is the recommended approach.
 
     CONTINUE_ON_ERROR:
         The transaction will continue processing all models in the
         dependency tree that have been marked for modification. The
         framework will persist on local cache only the models that
-        have been successfuly synchronized to the remote store. At the
-        end, a TransactionError is thrown, containing the list of all
-        models that have not been persisted on local cache.
+        have been successfuly synchronized to the remote store. No
+        cancellation will be done.
     """
     INTERRUPT_ON_ERROR = auto()
     CONTINUE_ON_ERROR = auto()
@@ -72,6 +53,98 @@ class TransactionState(IntEnum):
     GET = auto()
     COMMIT = auto()
     ROLLBACK = auto()
+
+
+DAOTaskCallable = Callable[[], Node]
+
+
+class DAOTask:
+    """
+    Wrapper object that, when awaited, contains a asyncio.Task running a DAO function
+    during a Transaction commit.
+
+    When a DAOTask instance is awaited for the first time, it triggers `run_task()`
+    and returns the result from the undelying task wrapping `func`. Awaiting the same
+    instance multiple times will not retrigger the task, but instead will return the
+    value from the first call. Alternatively, it is also possible to retrieve the underlying
+    task directly through the attribute `task`.
+
+    Running a DAOTask will also record the `start_time` and `end_time` of the first execution.
+    """
+    _task: Optional[asyncio.Task[Node]]
+    node: Node
+    func: DAOTaskCallable
+    start_time: float
+    end_time: float
+
+    def __init__(self, node: Node, func: DAOTaskCallable):
+        self.node = node
+        self.func = func
+        self.start_time = 0.0
+        self.end_time = 0.0
+        self._task = None
+
+    def run_task(self) -> asyncio.Task:
+        """
+        Creates and returns a asyncio.Task that runs `func` when called for the first time.
+        When called multiple times, returns the existing asyncio.Task created during the
+        first execution.
+
+        :return: The asyncio.Task instance.
+        """
+        if self._task:
+            return self._task
+
+        self.start_time = time.time()
+
+        task: asyncio.Task = asyncio.create_task(self.func(self.node.node_object))
+        task.add_done_callback(self._task_finished)
+
+        self._task = task
+        return task
+
+    def __await__(self):
+        return self.run_task().__await__()
+
+    @property
+    def task(self) -> asyncio.Task:
+        """
+        Contains the underlying asyncio.Task.
+
+        :raises RuntimeError: When a Task has not yet been triggered.
+        :return: The asyncio.Task instance.
+        """
+        if not self._task:
+            raise RuntimeError("DAOTask not started.")
+        return self._task
+
+    def _task_finished(self, future):
+        self.end_time = time.time()
+        self.task.remove_done_callback(self._task_finished)
+
+    @property
+    def duration(self) -> float:
+        """
+        Returns the duration of the execution (in seconds).
+
+        :raises RuntimeError: When the execution has not been finished.
+        :return: The duration (in seconds).
+        """
+        if not self.start_time or not self.end_time:
+            raise RuntimeError("Task not finished.")
+        return self.end_time - self.start_time
+
+    @property
+    def model(self) -> BaseModel:
+        """
+        Returns the BaseModel contained by the `node`.
+
+        :return: The BaseModel instance.
+        """
+        return self.node.node_object
+
+    def __lt__(self, value: DAOTask):
+        return self.end_time < value.end_time
 
 
 def transactionstate(state: TransactionState):
@@ -438,13 +511,14 @@ class Transaction:
                     )
 
     @transactionstate(TransactionState.COMMIT)
-    async def commit(self):
+    async def commit(self) -> List[DAOTask]:
         """
         Persists all models on the remote server. Models that have been successfully
         submited are also persisted on the local cache by the end of the operation.
 
         :raises RuntimeError: When model doesn't have a DAO associated with its type.
-        :raises TransactionError: When the commit fails on DAO level.
+        :return: A list containing all DAOTask's performed by the commit, in the order
+                 in which the operations have been finalized.
         """
         cached_values = self._model_cache.get_all_models()
 
@@ -468,114 +542,137 @@ class Transaction:
         # add, update and remove get one graph each, as
         # each level needs to be completely finished in
         # order for the next to proceed
-        graphs = list(
-            map(
-                lambda m: DependencyGraph.generate_from_objects(m), (models_to_add, models_to_update, models_to_remove)
-            )
-        )
-
-        directions: List[NavigationDirection] = [
-            NavigationDirection.LEAVES_TO_ROOTS, NavigationDirection.LEAVES_TO_ROOTS, NavigationDirection.ROOTS_TO_LEAVES
+        graphs = [
+            DependencyGraph.generate_from_objects(m)
+            for m in (models_to_add, models_to_update, models_to_remove)
         ]
 
+        directions: List[NavigationDirection] = [
+            NavigationDirection.LEAVES_TO_ROOTS,
+            NavigationDirection.LEAVES_TO_ROOTS,
+            NavigationDirection.ROOTS_TO_LEAVES
+        ]
+
+        results: List[DAOTask] = []
         try:
-            await self._process_all_graphs(graphs, directions)
-        except TransactionError:
-            raise
+            async for task in self._process_all_graphs(graphs, directions):
+                results.append(task)
         finally:
             # clean up models that were discarded
-            discarded_models: Set[BaseModel] = set(filter(lambda m: m._state == ModelState.DISCARDED, all_models))
+            discarded_models: Set[BaseModel] = set(m for m in all_models if m._state == ModelState.DISCARDED)
             for model in discarded_models:
                 self._model_cache.unregister(model)
                 self._unsubscribe_update(model)
             self.update_cache()
+        return results
 
     async def _process_all_graphs(self, graphs: List[DependencyGraph], directions: List[NavigationDirection]):
-        all_processed_models: Deque[BaseModel] = deque()
-        exception_queue: Deque[TransactionOperationError] = deque()
+        cancel = False
+
         for graph, direction in zip(graphs, directions):
-            try:
-                # processes next level, one at a time
-                processed_models = await self._process_all_trees(graph, direction)
-            except TransactionError as ex:
-                processed_models = ex.models
-                exception_queue.extendleft(ex.errors)
-                # INTERRUPT_ON_ERROR will only allow trees on the same
-                # graph to finalize their on going processes - therefore
-                # further levels need to be skipped
-                if self._strategy == PersistencyStrategy.INTERRUPT_ON_ERROR:
-                    break
-                # CONTINUE_ON_ERROR will keep going - this statement is
-                # superfluous, but was placed to make the operation explicit
-                elif self._strategy == PersistencyStrategy.CONTINUE_ON_ERROR:
-                    continue
-            finally:
-                # keeps record of all processed models, in order
-                if processed_models:
-                    all_processed_models.extendleft(processed_models)
+            # this will avoid moving to the next graph if an error
+            # occurs and the cancellation is enabled
+            if cancel:
+                break
 
-        # processed models are persisted into cache
-        for model in all_processed_models:
-            # TODO: add event to detect changes on primary keys and
-            # propagate the values back into the model cache for remapping
-            model._persist()
-            model._state = ModelStateMachine.transition(Transition.PERSIST_OBJECT, model._state)
-
-        # propagates exception if exists
-        if exception_queue:
-            raise TransactionError(exception_queue, all_processed_models)
+            # processes next level, one at a time
+            async for dao_task in self._process_all_trees(graph, direction):
+                model = None
+                try:
+                    # we await here to check if any exceptions were raised
+                    # and also to collect the node that was processed
+                    await dao_task
+                    model = dao_task.model
+                except Exception:
+                    # INTERRUPT_ON_ERROR will only allow trees on the same
+                    # graph to finalize their on going processes - therefore
+                    # further levels need to be skipped
+                    if self._strategy == PersistencyStrategy.INTERRUPT_ON_ERROR:
+                        cancel = True
+                    # CONTINUE_ON_ERROR will keep going - this statement is
+                    # superfluous, but was placed to make the operation explicit
+                    elif self._strategy == PersistencyStrategy.CONTINUE_ON_ERROR:
+                        continue
+                finally:
+                    if model:
+                        model._persist()
+                        model._state = ModelStateMachine.transition(Transition.PERSIST_OBJECT, model._state)
+                    yield dao_task
 
     async def _process_all_trees(self, graph: DependencyGraph, direction: NavigationDirection) \
-            -> Deque[BaseModel]:
-        loop = asyncio.get_running_loop()  # noqa
-        tasks = [loop.create_task(self._process_tree(tree, direction)) for tree in graph.trees]
-        values: Deque[BaseModel] = deque()
-        errors: Deque[TransactionOperationError] = deque()
+            -> AsyncIterator[DAOTask]:
 
-        for task in asyncio.as_completed(tasks):
-            task_value: Optional[Deque[BaseModel]] = None
-            error_value: Optional[Deque[TransactionOperationError]] = None
+        all_results: List[DAOTask] = []
+
+        # this will iterate over each tree separately
+        async def iterate_tree(tree, direction):
+            tree_results = []
+            async for dao_task in self._process_tree(tree, direction):
+                tree_results.append(dao_task)
+            return tree_results
+
+        # the following block will guarantee that the trees are triggered in parallel
+        # and operations run as fast as possible
+        tree_iterate_tasks = [asyncio.create_task(iterate_tree(t, direction)) for t in graph.trees]
+        for iterate_task in asyncio.as_completed(tree_iterate_tasks):
+            all_results.extend(await iterate_task)
+
+        # with the parallelization, we lost control of the order in which the models were
+        # processe between the trees, so we need to reorder and yield back
+        for x in sorted(all_results):
+            yield x
+
+    async def _process_tree(self, tree: Tree, direction: NavigationDirection) -> AsyncGenerator[DAOTask, None]:
+        navigate_queue: asyncio.Queue[Node] = asyncio.Queue()
+        finished_queue: asyncio.Queue[DAOTask] = asyncio.Queue()
+        tasks: List[asyncio.Task[DAOTask]] = []
+        cancel = False
+
+        # collects nodes to be processed
+        nodes = tree.get_nodes()
+        nodes_callables: Dict[Node, DAOTask] = self._get_dao_tasks(nodes)
+
+        # creates a task to handle the node and propagate
+        # the values across the queues
+        async def node_task(node):
+            nonlocal cancel
+            dao_task: DAOTask = nodes_callables[node]
+
+            # we don't care about the value of the task here, we only
+            # try and except to catch errors and interrupt the execution
+            # if necessary
             try:
-                # awaits each tree to be processed
-                task_value = await task
-            except TreeProcessException as ex:
-                # the awaiting task that triggered the exception needs
-                # to be post-processed so all errors and already processed
-                # models are collected
-                error_value = deque(
-                    [
-                        TransactionOperationError(e.error, e.node.node_object) for e in ex.processed_values
-                        if isinstance(e, NodeProcessException)
-                    ]
-                )
-                task_value = deque([x for x in ex.processed_values if isinstance(x, BaseModel)])
-
-                # INTERRUPT_ON_ERROR will send a cancellation signal to all trees
-                # in graph if one tree triggers an exception - trees will finalize
-                # their on going business and return the processed models on the
-                # await statement
+                await dao_task
+            except Exception:
+                # in this case, we flag to interrupt scheduling new tasks
                 if self._strategy == PersistencyStrategy.INTERRUPT_ON_ERROR:
-                    for tree in graph.trees:
-                        tree.cancel()
-            finally:
-                if task_value is not None:
-                    values.extendleft(task_value)
-                if error_value is not None:
-                    errors.extendleft(error_value)
+                    cancel = True
 
-        # propagates exception if exists
-        if errors:
-            raise TransactionError(errors, values)
+            # informs tree.navigate that a new node has been processed
+            await navigate_queue.put(node)
+            # queues up a new value to be yielded
+            await finished_queue.put(dao_task)
 
-        return values
+        async for node in tree.navigate(nodes, direction, navigate_queue):
+            # yields the processed values before scheduling
+            # a new task
+            while not finished_queue.empty():
+                yield await finished_queue.get()
 
-    async def _process_tree(self, tree: Tree, direction: NavigationDirection) -> Deque[BaseModel]:
-        nodes_callables = self._get_nodes_callables(tree.get_nodes())
-        return await tree.process(
-            set(nodes_callables.items()), direction, self._strategy == PersistencyStrategy.INTERRUPT_ON_ERROR
-        )
+            # stops scheduling new values if the task is canceled
+            if cancel:
+                break
 
-    def _get_nodes_callables(self, nodes: Set[Node]) -> Dict[Node, Optional[CallbackCoroutineCallable]]:
+            # schedules a new DAO task
+            task = asyncio.create_task(node_task(node))
+            tasks.append(task)
+
+        # processes the remaining items after the generator has been
+        # finalized
+        while not finished_queue.empty():
+            yield await finished_queue.get()
+
+    def _get_dao_tasks(self, nodes: Set[Node]) -> Dict[Node, DAOTask]:
         callables = {}
 
         for node in nodes:
@@ -584,26 +681,16 @@ class Transaction:
             if not dao:
                 raise RuntimeError(f"Model of type `{type(model)}` does not contain DAOs.")
 
-            model_callable = None
-
-            def func(target, x) -> CallbackCoroutineCallable:
-                async def dao_call() -> Tuple[Node, Any]:
-                    try:
-                        await target(x.node_object)
-                        return x, x.node_object
-                    except Exception as ex:
-                        raise NodeProcessException(ex, x)
-
-                return dao_call
+            model_callable: DAOTaskCallable
 
             if model._state == ModelState.NEW:
-                model_callable = func(dao.add, node)
+                model_callable = dao.add
             elif model._state == ModelState.DIRTY:
-                model_callable = func(dao.update, node)
+                model_callable = dao.update
             elif model._state == ModelState.DELETED:
-                model_callable = func(dao.remove, node)
+                model_callable = dao.remove
 
-            callables[node] = model_callable
+            callables[node] = DAOTask(node, model_callable)
 
         return callables
 

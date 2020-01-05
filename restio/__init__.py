@@ -5,8 +5,7 @@ from .graph import DependencyGraph, Node, Tree
 from .model import BaseModel, PrimaryKey, mdataclass
 from .query import BaseQuery, query
 from .state import ModelState, ModelStateMachine, Transition
-from .transaction import (Transaction, TransactionError,
-                          TransactionOperationError, TransactionState)
+from .transaction import Transaction, TransactionState
 
 __name__ = "restio"
 __version__ = "0.1.1"
@@ -20,5 +19,4 @@ __all__ = [
     'PrimaryKey',
     'query',
     'mdataclass',
-    'TransactionError'
 ]

@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 from enum import Enum
-from typing import (Any, Callable, Coroutine, Deque, Dict, Generator, List,
-                    Optional, Set, Tuple, Union, cast)
+from typing import (Any, AsyncGenerator, Callable, Deque, Dict, List, Optional,
+                    Set, Tuple, Union, cast)
 
 # As a design decision, the classes in this file are bound to BaseModel
 # to facilitate the navigation across different objects by utilizing
@@ -94,25 +94,11 @@ class Node:
 
 
 GetRelativesCallable = Callable[[Node, bool, Optional[Set[Node]]], Set[Node]]
-CallbackCoroutineCallable = Callable[[], Coroutine[Any, Any, Tuple[Node, Any]]]
 
 
 class NavigationDirection(Enum):
     ROOTS_TO_LEAVES: Tuple[GetRelativesCallable, GetRelativesCallable] = (Node.get_parents, Node.get_children)
     LEAVES_TO_ROOTS: Tuple[GetRelativesCallable, GetRelativesCallable] = (Node.get_children, Node.get_parents)
-
-
-class NodeProcessException(Exception):
-    def __init__(self, error: Exception, node: Node):
-        super().__init__(error)
-        self.error = error
-        self.node = node
-
-
-class TreeProcessException(Exception):
-    def __init__(self, processed_values: Deque[Union[Any, NodeProcessException]]):
-        super().__init__()
-        self.processed_values = processed_values
 
 
 class Tree:
@@ -156,95 +142,6 @@ class Tree:
         """
         return self._get_tree_leafs(self.nodes)
 
-    async def process(
-        self,
-        nodes_tasks: Set[Tuple[Node, Optional[CallbackCoroutineCallable]]],
-        direction: NavigationDirection,
-        cancel_on_error: bool = True
-    ) -> Deque[Any]:
-        """
-        Traverses the dependency Tree based on asynchronous callbacks/tasks attributed
-        to each Node using `navigate`. Once tasks are done for a Node, then it is put
-        into the internal `processed_nodes` queue that is shared with the internal `navigate`
-        generator instance. The processing will hang when all available processable Nodes
-        are running and no new Node tasks can be scheduled.
-
-        The order in which the processing happened is returned in a queue. Errors
-        are ignored during processing when `cancel_on_error` is False, and raised at the end
-        with a list of all values. When `cancel_on_error` is True, then all current tasks are
-        finalized and then all values processed so far are raised as an exception.
-
-        :param nodes_tasks: The set of Nodes and tasks to be processed.
-        :param direction: The direction of navigation, either from LEAVES_TO_ROOTS (navigates
-                          upwards in the tree) or ROOTS_TO_LEAVES (navigates downwards in the
-                          tree).
-        :param cancel_on_error: Cancels the processing if a task exception is raised when True,
-                                otherwise raises the exception once current tasks are finalized.
-                                Defaults to True.
-        :raises TreeProcessException: When at least one error occurs during processing of tasks.
-        :return: The queue of processed values, in order.
-        """
-
-        self._processing = True
-        self._canceled = False
-
-        task_map = {node: task for node, task in nodes_tasks}
-        nodes = set(task_map.keys())
-        triggered_tasks = set()
-        processed_nodes: Deque[Node] = deque()
-        returned_values: Deque[Union[Any, NodeProcessException]] = deque()
-        error_flag: bool = False
-
-        loop = asyncio.get_event_loop()
-
-        for node in self.navigate(nodes, direction, processed_nodes):
-            # new node is available to be processed, so
-            # add it to the task set
-            if isinstance(node, Node):
-                coroutine = task_map.get(node, None)
-                # if cancellation has been flagged, then
-                # don't schedule any extra task
-                if coroutine and not self._canceled:
-                    triggered_tasks.add(loop.create_task(coroutine()))
-
-            # no more node processes to be scheduled, so
-            # wait for current running tasks and process
-            # the next completed one
-            elif triggered_tasks:
-                done, pending = await asyncio.wait(triggered_tasks, return_when=asyncio.FIRST_COMPLETED)
-                for completed_task in done:
-                    triggered_tasks.remove(completed_task)  # type: ignore
-                    processed_node: Optional[Node] = None
-                    try:
-                        processed_node, coroutine_value = await completed_task
-                    except NodeProcessException as ex:
-                        error_flag = True
-                        coroutine_value = ex
-
-                        # when the error occurs, then we queue the exception
-                        # instead of the regular return value from the task,
-                        # if cancellation is not in place, to keep the tree
-                        # going - we set the cancel state otherwise, so no
-                        # further dependent nodes get scheduled
-                        if cancel_on_error:
-                            self.cancel()
-                        else:
-                            processed_node = ex.node
-                    finally:
-                        if processed_node:
-                            processed_nodes.appendleft(processed_node)
-                        returned_values.appendleft(coroutine_value)
-            elif not processed_nodes:
-                break
-
-        self._canceled = False
-        self._processing = False
-
-        if error_flag:
-            raise TreeProcessException(returned_values)
-
-        return returned_values
-
     def get_nodes(self) -> Set[Node]:
         """
         Returns a copy of all nodes in the Tree.
@@ -253,13 +150,13 @@ class Tree:
         """
         return self.nodes.copy()
 
-    def navigate(self, nodes: Set[Node], direction: NavigationDirection,
-                 processed_nodes: Deque[Node]) -> Generator[Optional[Node], Node, bool]:
+    async def navigate(self, nodes: Set[Node], direction: NavigationDirection,
+                       processed_nodes: asyncio.Queue[Node]) -> AsyncGenerator[Node, bool]:
         """
         Traverses the dependency Tree based on already processed nodes. The caller should
         maintain the queue `processed_nodes` with the nodes that have been processed on the
         past iteration. This generator will yield a Node instance when possible, otherwise it will
-        yield None to indicate that it is not possible to move on without extra nodes processed.
+        hang until extra nodes processed.
         The Tree traversal order will depend on the `direction` specified (either from roots to
         leaves or leaves to roots) and the order in which nodes are processed by the caller.
 
@@ -270,7 +167,6 @@ class Tree:
         :param processed_nodes: The queue containing the nodes that have just been processed
                                 by the caller.
         :raises TypeError: If the direction is invalid.
-        :return: True if all nodes have been processed. False otherwise.
         """
 
         if direction == NavigationDirection.LEAVES_TO_ROOTS:
@@ -281,23 +177,27 @@ class Tree:
             raise TypeError("The provided argument `direction` is invalid.")
 
         from_direction, to_direction = direction.value
-        next_nodes = deque(set(filter(lambda n: n in nodes, entrypoint)))
+        next_nodes = deque(n for n in entrypoint if n in nodes)
+
+        processed: Optional[Node] = None
 
         while nodes or next_nodes:
-            yield next_nodes.pop() if next_nodes else None
-            processed = processed_nodes.pop() if processed_nodes else None
+            if next_nodes:
+                yield next_nodes.pop()
+                continue
 
-            if isinstance(processed, Node):
-                if processed not in nodes:
-                    return False
-                nodes.remove(processed)
+            processed = await processed_nodes.get()
 
-                nodes_to_direction = to_direction(processed) if processed else set()
-                for node_to in nodes_to_direction:
-                    nodes_from_direction = from_direction(node_to)
-                    if not nodes_from_direction.intersection(nodes):
-                        next_nodes.appendleft(node_to)
-        return True
+            if isinstance(processed, Node) and processed not in nodes:
+                return
+
+            nodes.remove(processed)
+
+            nodes_to_direction = to_direction(processed) if processed else set()
+            for node_to in nodes_to_direction:
+                nodes_from_direction = from_direction(node_to)
+                if not nodes_from_direction.intersection(nodes):
+                    next_nodes.appendleft(node_to)
 
     def cancel(self):
         """

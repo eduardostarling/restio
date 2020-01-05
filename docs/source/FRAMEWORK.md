@@ -165,6 +165,27 @@ await t.commit()
 
 The *commit* method will inspect all models stored on the transaction's internal cache and verify which models should be modified. Its is not up to the BLL anymore to figure out in which order the operations need to be persisted on the remote server, and which models are unchanged. The transaction will take care of drawing the graph of dependencies between models and trigger all requests to the remote REST API accordingly.
 
+If anything goes wrong when processing a model, then it is possible to revisit all tasks performed by the commit:
+
+```python
+from restio import DAOTask
+
+...
+
+tasks = await t.commit()
+
+dao_task: DAOTask
+for dao_task in tasks:
+    try:
+        # obtains the value returned by the DAO function, if any
+        result = await dao_task
+    except Exception:
+        # if something went wrong during the commit, then it is time
+        # to treat it - below, we just print the stack trace to the
+        # terminal
+        dao_task.task.print_stack()
+```
+
 # More information
 
 The page [Strategies](STRATEGIES.md) contains important information about the internals of *restio*. Please read this page if you consider using this framework in production.

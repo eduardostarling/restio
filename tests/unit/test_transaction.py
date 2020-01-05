@@ -12,8 +12,7 @@ from restio.graph import DependencyGraph, NavigationDirection
 from restio.model import BaseModel, PrimaryKey, ValueKey, mdataclass
 from restio.query import query
 from restio.state import ModelState
-from restio.transaction import (PersistencyStrategy, Transaction,
-                                TransactionError)
+from restio.transaction import DAOTask, PersistencyStrategy, Transaction
 
 caller = None
 
@@ -84,7 +83,7 @@ async def EmptyQuery(self, query_arg: TestTransaction) -> List[ModelA]:
     return []
 
 
-class TestTransaction:
+class ModelsFixture:
     @pytest.fixture
     def models(self):
         """
@@ -152,6 +151,12 @@ class TestTransaction:
 
         return models
 
+
+class TestDAOTask(ModelsFixture):
+    pass
+
+
+class TestTransaction(ModelsFixture):
     @pytest.fixture
     def t(self):
         return Transaction()
@@ -574,19 +579,29 @@ class TestTransaction:
         for model in models:
             t.register_model(model)
 
-        with pytest.raises(TransactionError) as error:
-            await t.commit()
-
-        ex = error.value
+        error_models, processed_models = await self._process_transaction(t)
 
         a_cache, b_cache = [t._model_cache.get_by_internal_id(ModelA, y._internal_id) for y in [a, b]]
         assert b_cache is None
         assert a_cache is not None
         assert a_cache._state == ModelState.DELETED
 
-        assert set(ex.models) == set([f, e, d, b])
-        assert len(ex.errors) == 1
-        assert ex.errors[0].model == a
+        assert set(processed_models) == set([f, e, d, b])
+        assert len(error_models) == 1
+        assert error_models.pop() == a
+
+    async def _process_transaction(self, transaction):
+        error_models = set()
+        processed_models = set()
+
+        for dao_task in await transaction.commit():
+            try:
+                await dao_task
+                processed_models.add(dao_task.model)
+            except Exception:
+                error_models.add(dao_task.model)
+
+        return error_models, processed_models
 
     @pytest.mark.asyncio
     async def _check_exception_strategies(self, models, strategy, expected):
@@ -596,13 +611,9 @@ class TestTransaction:
         for model in models:
             t.register_model(model)
 
-        with pytest.raises(TransactionError) as error:
-            await t.commit()
+        error_models, processed_models = await self._process_transaction(t)
 
-        ex = error.value
         expected_processed, maybe_processed, expected_errors, expected_not_processed = expected
-        processed_models = set(ex.models)
-        error_models = set([e.model for e in ex.errors])
         pending_models = t.get_transaction_models()
 
         # A model that may have been processed is either processed or
@@ -653,10 +664,12 @@ class TestTransaction:
 
         y = DependencyGraph.generate_from_objects(models)
 
-        processed_models = await t._process_all_trees(y, NavigationDirection.LEAVES_TO_ROOTS)
-        models = models.difference(set(processed_models))
+        processed_models = set()
+        async for dao_task in t._process_all_trees(y, NavigationDirection.LEAVES_TO_ROOTS):
+            assert isinstance(dao_task, DAOTask)
+            processed_models.add(dao_task.model)
 
-        assert len(models) == 0
+        assert not models.difference(processed_models)
 
     @pytest.mark.asyncio
     async def test_process_tree(self, t, models):
@@ -669,12 +682,15 @@ class TestTransaction:
 
         y = DependencyGraph.generate_from_objects(models)
 
-        processed_models = list(reversed(await t._process_tree(y.trees[0], NavigationDirection.LEAVES_TO_ROOTS)))
+        processed_models = set()
+        async for dao_task in t._process_tree(y.trees[0], NavigationDirection.LEAVES_TO_ROOTS):
+            assert isinstance(dao_task, DAOTask)
+            processed_models.add(dao_task.model)
 
-        assert models == processed_models
+        assert set(models) == processed_models
 
     @pytest.mark.asyncio
-    async def test_get_models_callables(self, t, models):
+    async def test_get_dao_tasks(self, t, models):
         a, b, c = models
         t.register_dao(ModelDAO(ModelA))
 
@@ -686,10 +702,13 @@ class TestTransaction:
             for model in models:
                 model._state = state
 
-            for node, coroutine in t._get_nodes_callables(tree.get_nodes()).items():
-                node_return, model_return = await coroutine()
-                assert node.node_object == model_return
-                assert node == node_return
+            for node, dao_task in t._get_dao_tasks(tree.get_nodes()).items():
+                node_return = dao_task.node
+                model_return = await dao_task
+
+                assert model_return == node.node_object
+                assert dao_task.model == node.node_object
+                assert node_return == node
 
     @pytest.mark.asyncio
     async def test_rollback(self, t, models_complex):

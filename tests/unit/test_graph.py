@@ -184,84 +184,31 @@ class TestNode(ModelsFixture):
 
 
 class TestTree(ModelsFixture):
-    async def validate_process(self, models, nodes, trees):
-        processed_nodes = []
-        directions = (NavigationDirection.LEAVES_TO_ROOTS, NavigationDirection.ROOTS_TO_LEAVES)
+    async def validate_navigate(self, models, nodes, trees):
+        for tree, direction in itertools.product(trees, iter(NavigationDirection)):
+            processed_nodes = asyncio.Queue()
+            navigated_nodes = set()
 
-        for direction in directions:
-            from_direction, to_direction = direction.value
-            for tree in trees:
-                def consume(node):
-                    async def consume_function():
-                        await asyncio.sleep(randint(1, 100) / 10000)
-                        processed_nodes.append(node)
-                        return node, node
-                    return consume_function
+            # iterate over all nodes by immediately adding them to the queue
+            # of processed nodes once they are yielded by the generator
+            async for node in tree.navigate(tree.get_nodes(), direction, processed_nodes):
+                assert node is not None
+                navigated_nodes.add(node)
+                await processed_nodes.put(node)
 
-                # generate (node, coroutine) tuples
-                nodes_coroutines = set(map(lambda n: (n, consume(n)), tree.get_nodes()))
-                # results come in queue format, therefore
-                # we need to iterate in reverse order
-                processed_nodes = list(reversed(await tree.process(nodes_coroutines, direction)))
-
-                for index, node in enumerate(processed_nodes):
-                    relatives = to_direction(node)
-                    for relative in relatives:
-                        assert processed_nodes.index(relative) > index
-
-    def validate_navigate(self, models, nodes, trees):
-        for tree in trees:
-            for direction in NavigationDirection:
-                processed_nodes = deque()
-                # if all nodes are processed right away,
-                # then the generator should not return None's
-                for node in tree.navigate(tree.get_nodes(), direction, processed_nodes):
-                    assert node is not None
-                    processed_nodes.append(node)
-
-                assert len(processed_nodes) == 0
-
-                # if no node is processed, then eventually
-                # the generator will return None (after processing
-                # the periferal nodes). This is not valid if the tree
-                # has a single element
-                for node in tree.navigate(tree.get_nodes(), direction, set()):
-                    processed_nodes.append(node)
-                    if node is None:
-                        break
-
-                assert len(processed_nodes) > 0
-
-                if len(processed_nodes) > 1:
-                    assert None in processed_nodes
-                else:
-                    assert None not in processed_nodes
+            # all nodes should show up at least once
+            assert len(navigated_nodes) == len(tree.get_nodes())
+            assert processed_nodes.empty()
 
         return trees
 
     @pytest.mark.asyncio
-    async def test_process(self, models, nodes, trees):
-        await self.validate_process(models, nodes, trees)
+    async def test_navigation(self, models, nodes, trees):
+        await self.validate_navigate(models, nodes, trees)
 
     @pytest.mark.asyncio
-    async def test_process_complex(self, models_complex, nodes_complex, trees_complex):
-        await self.validate_process(models_complex, nodes_complex, trees_complex)
-
-    def test_navigation(self, models, nodes, trees):
-        self.validate_navigate(models, nodes, trees)
-
-    def test_navigation_complex(self, models_complex, nodes_complex, trees_complex):
-        self.validate_navigate(models_complex, nodes_complex, trees_complex)
-
-    def test_navigation_invalid_node(self, models, nodes, trees):
-        first_tree, second_tree = trees
-
-        gen = first_tree.navigate(first_tree.get_nodes(), NavigationDirection.LEAVES_TO_ROOTS,
-                                  deque(second_tree.get_nodes()))
-
-        next(gen)
-        with pytest.raises(StopIteration):
-            next(gen)
+    async def test_navigation_complex(self, models_complex, nodes_complex, trees_complex):
+        await self.validate_navigate(models_complex, nodes_complex, trees_complex)
 
 
 class TestGraph(ModelsFixture):
