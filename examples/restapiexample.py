@@ -60,6 +60,11 @@ class EmployeeDAO(BaseDAO):
         return self._get_model(json)
 
     async def update(self, model: Employee):
+        # creates a fictitious error, with 20% chance of failure
+        raise_error = random.randint(1, 10) > 8
+        if raise_error:
+            raise ValueError("Error ocurred during update")
+
         model_dict = {'name': model.name, 'salary': model.salary, 'age': model.age}
         model_json = json.dumps(model_dict)
 
@@ -77,7 +82,8 @@ class EmployeeDAO(BaseDAO):
 
 @query
 async def get_employees(self, dao: EmployeeDAO) -> List[Employee]:
-    employees = dao.client.get_employees()
+    # to speed it up, we load only the first 100 employees
+    employees = dao.client.get_employees()[:100]
     return [dao._get_model(x) for x in employees]
 
 
@@ -95,43 +101,55 @@ async def main():
     employees: List[Employee] = await t.query(q)
 
     print("Size: ", len(employees))
-    print("First employee: ", employees[0])
 
     # gets the primary keys
-    employee_id = employees[0].id
+    employee_ids = [emp.id for emp in employees[:5]]
 
     # resets the transaction by clearing the cache
     t.reset()
 
-    # retrieves the selected employee from the remote
-    # the loop exists to validate the cache only - the
-    # first call will make the request, while the rest
-    # will be ignored
+    # retrieves the selected employees from the remote
+    # the loop exists to validate the cache only
     employee: Optional[Employee]
     tasks = []
-    for _ in range(0, 2):
+    for employee_id in employee_ids:
         tasks.append(t.get(Employee, employee_id))
 
+    to_modify = []
     for coro in asyncio.as_completed(tasks):
         employee = await coro  # grabs the loaded employee
+        to_modify.append(employee)
         print("Manually loaded employee: ", employee)
 
     # makes a change to be reflected on the server
-    employee.name = "MyAwesomeName" + str(random.randint(10000, 99999))
-    print("Employee persistent cache: ", employee._persistent_values)
+    for employee in to_modify:
+        employee.name = "MyAwesomeName" + str(random.randint(10000, 99999))
+        print("Employee persistent cache: ", employee._persistent_values)
 
     # submits the change to the remote server
-    await t.commit()
-    print("Employee modified: ", employee)
-    print("Employee persistent cache after modifying: ", employee._persistent_values)
+    results = await t.commit()
+
+    # we iterate over the results to make sure everything
+    # went well
+    for dao_task in results:
+        try:
+            await dao_task
+        except Exception:
+            # there was an error, so we print the stack
+            dao_task.task.print_stack()
+
+    for employee in to_modify:
+        print("Employee modified: ", employee)
+        print("Employee persistent cache after modifying: ", employee._persistent_values)
 
     # resets the local cache
     t.reset()
 
-    # reloads the employee from the remote server to verify
-    # that the change was effective
-    employee = await t.get(Employee, employee_id)
-    print("Manually reloaded employee: ", employee)
+    # reloads the employees from the remote server to verify
+    # that the changes were effective
+    for employee_id in employee_ids:
+        employee = await t.get(Employee, employee_id)
+        print("Manually reloaded employee: ", employee)
 
 
 if __name__ == "__main__":

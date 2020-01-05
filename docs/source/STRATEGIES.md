@@ -90,12 +90,13 @@ The logic for deciding the order in which models are persisted is the following:
   - All trees in a graph are processed in parallel in the `asyncio` event loop.
   - Each group of nodes are scheduled in parallel in the `asyncio` event loop.
   - As soon as a node is processed, the next node(s) is (are) scheduled to be persisted if the tree structure allows (that means, if all children of a particular node have been processed, that node can be processed). Otherwise, the processor awaits until a new node is processed, and the inspection for a new node restarts.
-  - If an error occurs, the processing will bexception_queuee conditioned to the `PersistencyStrategy` defined for the transaction. This should be set per transaction scope and the choice might vary according to the use case:
+  - If an error occurs, the processing will be conditioned to the `PersistencyStrategy` defined for the transaction. This should be set per transaction scope and the choice might vary according to the use case:
     - `INTERRUPT_ON_ERROR` will cause the commit to interrupt the scheduling of new nodes and will wait until current processes finalize.
     - `CONTINUE_ON_ERROR` will cause the commit to ignore the error messages and continue processing all available nodes.
   - Models that have been persisted on the remote will be also persisted on the local cache, while models not processed or processed with error are not persisted on cache. This behavior does not depend on the `PersistencyStrategy`. Models that have been deleted will be discarded from cache, and models that changed primary keys will be re-registered after the commit is done.
 
-6. If any error occured, a `TransactionError` will be thrown containing a queue with all errors caught, and a queue with all models that have been processed correctly.
+6. All processed actions performed by the DAOs are returned by the `commit` in the form of a list of `DAOTask`s. Each `DAOTask` can then be awaited after the commit. Tasks that raised an `Exception` during the commit will then
+raise it once more upon awaiting.
 
 ### Rollback
 
