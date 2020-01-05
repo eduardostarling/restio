@@ -2,7 +2,7 @@ from collections.abc import Hashable
 from typing import Dict, List, Optional, Set, Tuple, Type, overload
 from uuid import UUID
 
-from .model import BaseModel, ValueKey
+from .model import BaseModel, ValueKey, _check_model_type
 from .query import BaseQuery
 
 IdCacheKey = Tuple[str, str]
@@ -27,10 +27,6 @@ class ModelCache:
         """
         self._id_cache = {}
         self._key_cache = {}
-
-    def _check_object_type(self, obj: Optional[BaseModel]):
-        assert obj is not None
-        assert isinstance(obj, BaseModel)
 
     def register(self, obj: BaseModel, force: bool = False) -> bool:
         """Registers a model into the internal cache.
@@ -74,7 +70,7 @@ class ModelCache:
         self._remove_from_cache(cached_model_id, cached_model_key)
 
     def _get_type_key_hash(self, obj: BaseModel):
-        self._check_object_type(obj)
+        _check_model_type(obj)
 
         obj_type = obj.__class__
         obj_pk = obj.get_keys()
@@ -205,8 +201,8 @@ class QueryCache:
                       if it is already registered in cache. Defaults to False
         :return: True if the results have been registered. False otherwise.
         """
-        assert obj is not None
-        assert isinstance(obj, Hashable)
+        if not isinstance(obj, BaseQuery) or not isinstance(obj, Hashable):
+            raise TypeError("The provided `obj` should be a hashable instance of BaseQuery")
 
         h = str(obj.__hash__())
         cached = None
