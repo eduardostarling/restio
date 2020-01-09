@@ -157,12 +157,28 @@ class TestModel:
         assert a.b == old_value_b
         assert 'b' not in a._persistent_values
 
-    def test_get_children(self):
+    @pytest.mark.parametrize("iterable", [list, set, frozenset, tuple])
+    def test_get_children_with_iterable(self, iterable):
         a = ModelA()
         b = ModelB()
         c = ModelC()
 
-        c.ref, b.ref = [b], a
+        c.ref, b.ref = iterable([b]), a
+
+        all_children = c.get_children(True)
+        assert a in all_children
+        assert b in all_children
+
+        one_child = c.get_children(False)
+        assert b in one_child
+        assert a not in one_child
+
+    def test_get_children_with_dict(self):
+        a = ModelA()
+        b = ModelB()
+        c = ModelC()
+
+        c.ref, b.ref = {"v": b}, a
 
         all_children = c.get_children(True)
         assert a in all_children

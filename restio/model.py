@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import types
+from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import wraps
 from typing import (Any, Dict, Generic, List, Optional, Set, Tuple, Type,
@@ -261,7 +262,12 @@ class BaseModel(Generic[T], metaclass=BaseModelMeta):
                     else:
                         children.append(child)
 
-            if isinstance(value, list) or isinstance(value, set):
+            # iterables are only supported if the values
+            # are not iterables - there is no recursiveness
+            if isinstance(value, Iterable):
+                if isinstance(value, dict):
+                    value = value.values()
+
                 for item in value:
                     check(item)
             else:
