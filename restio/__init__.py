@@ -8,7 +8,7 @@ from .state import ModelState, ModelStateMachine, Transition
 from .transaction import Transaction, TransactionState
 
 __name__ = "restio"
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 
 __all__ = [
     'BaseModel',
