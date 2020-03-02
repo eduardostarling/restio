@@ -99,40 +99,60 @@ def mdataclass(*args, **kwargs):
     return model_class
 
 
+STATIC_MUTABLE_ATTR = "__mutable__"
+STATIC_IMMUTABLE_ATTR = "__immutable__"
+
+
 class BaseModelMeta(type):
     """
     BaseModel metaclass. Responsible to internally cache the data schema in a
     BaseModel subclass by identifying fields that are primary keys, mutable and
     immutable.
     """
-    _class_mutable: Set[str]
-    _class_immutable: Set[str]
 
     def __new__(cls, name, bases, dct):
         x: BaseModel = super().__new__(cls, name, bases, dct)
 
-        x._class_primary_keys = {}
-        x._class_mutable = set()
-        x._class_immutable = set()
+        static_mutable = dct.get(STATIC_MUTABLE_ATTR, tuple())
+        static_immutable = dct.get(STATIC_IMMUTABLE_ATTR, tuple())
 
+        # set defaults
+        x._class_primary_keys = {}
+        x._class_mutable = set(static_mutable)
+        x._class_immutable = set(static_immutable)
+
+        # inherit from base classes
         for base in bases:
             try:
                 x._class_primary_keys.update(base._class_primary_keys)
+                x._class_mutable.update(base._class_mutable)
                 x._class_immutable.update(base._class_immutable)
             except Exception:
                 pass
 
+        # process class fields and properties when __mutable__ or __immutable__
+        # are not provided explicitly
         for field_name, field_value in dct.items():
-            if isinstance(field_value, types.FunctionType) or \
-               field_name.startswith('__'):
+            # ignore mutable/immutable static fields or private fields
+            if field_name in (STATIC_MUTABLE_ATTR, STATIC_IMMUTABLE_ATTR) or field_name.startswith('__'):
                 continue
 
-            if field_name.startswith('_'):
+            # ignore all functions
+            if isinstance(field_value, types.FunctionType):
+                continue
+
+            # ignore all fields starting with _
+            if not static_immutable and field_name.startswith('_'):
                 x._class_immutable.add(field_name)
-            else:
-                if isinstance(field_value, PrimaryKey):
-                    x._class_primary_keys.update({field_name: field_value._type})
+            elif not static_mutable:
                 x._class_mutable.add(field_name)
+
+        # ignore all immutable fields
+        x._class_mutable.difference_update(x._class_immutable)
+
+        for field_name, field_value in dct.items():
+            if field_name in x._class_mutable and isinstance(field_value, PrimaryKey):
+                x._class_primary_keys.update({field_name: field_value._type})
 
         return x
 
@@ -141,7 +161,7 @@ MODEL_UPDATE_EVENT = "__updated__"
 
 
 class BaseModel(Generic[T], metaclass=BaseModelMeta):
-    """
+    f"""
     A representation of a remote object model into a restio.Transaction object.
 
     BaseModel is an abstract class that should be extended to represent models incoming
@@ -152,7 +172,11 @@ class BaseModel(Generic[T], metaclass=BaseModelMeta):
     indicates the status of the model within the current context. The transactions are
     responsible to control this state. Also, each model contains a set of control attributes
     that indicate which fields are mutable, immutable or primary keys (provided by the
-    BaseModelMeta).
+    BaseModelMeta). By default, all static attributes (including properties) in the model
+    will become mutable attributes, except for those which names start with '_' . The
+    extended classes can control this behavior by providing the static fields
+    {STATIC_MUTABLE_ATTR} and {STATIC_IMMUTABLE_ATTR} (in which case, the default behavior
+    will be ignored for that class).
 
     Models that change over time will contain an internal dictionary with the latest
     know persistent value of each field. This is done to guarantee fast rollback of the

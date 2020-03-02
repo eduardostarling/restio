@@ -131,11 +131,90 @@ class TestModel:
         assert single_int.id == 3
         assert single_int.get_keys() == (3,)
 
-    def test_get_mutable(self, a, b):
+    def test_get_mutable_dataclass_default(self, a, b):
         assert set(a._class_mutable) == set(['id', 'a', 'b'])
         assert set(b._class_mutable) == set(['ref', 'c'])
         assert set(a._get_mutable_fields().values()) == set([None, 1, 'a'])
         assert set(b._get_mutable_fields().values()) == set([None, 'b'])
+
+    def test_get_mutable_dataclass_non_default(self):
+        @mdataclass
+        class ModelDataclass(BaseModel):
+            __mutable__ = ('a', 'b')
+            __immutable__ = ('_immutable',)
+
+            a: int
+            b: str
+            _immutable: float
+
+        assert ModelDataclass._class_mutable == set(['a', 'b'])
+        assert ModelDataclass._class_immutable == set(['_immutable'])
+
+    def test_get_mutable_dataclass_half_default_inheritance(self):
+        @mdataclass
+        class BaseModelDataClass(BaseModel):
+            __mutable__ = ('a',)
+            __immutable__ = ('_immutable_a',)
+
+            a: int
+            _immutable_a: int
+
+        @mdataclass
+        class ModelDataclass(BaseModelDataClass):
+            b: str = ""
+            _immutable_b: str = ""
+
+        assert BaseModelDataClass._class_mutable == set(['a'])
+        assert BaseModelDataClass._class_immutable == set(['_immutable_a'])
+        assert ModelDataclass._class_mutable == set(['a', 'b'])
+        assert ModelDataclass._class_immutable == set(['_immutable_a', '_immutable_b'])
+
+    def test_get_mutable_non_dataclass_non_default(self):
+        class ModelNonDataclass(BaseModel):
+            __mutable__ = ('a', 'b')
+            __immutable__ = ('_immutable',)
+
+            a: int
+            b: str
+            _immutable: float
+
+        assert ModelNonDataclass._class_mutable == set(['a', 'b'])
+        assert ModelNonDataclass._class_immutable == set(['_immutable'])
+
+    def test_get_mutable_non_dataclass_default(self):
+        class ModelNonDataclass(BaseModel):
+            a: int = 0
+            b: str = ""
+            _immutable: float = 0.0
+
+        assert ModelNonDataclass._class_mutable == set(['a', 'b'])
+        assert ModelNonDataclass._class_immutable == set(['_immutable'])
+
+    def test_get_mutable_non_dataclass_half_default(self):
+        class ModelNonDataclass(BaseModel):
+            __mutable__ = ('a', 'b')
+
+            a: int
+            b: str = ""
+            _immutable: float = 0.0
+
+        assert ModelNonDataclass._class_mutable == set(['a', 'b'])
+        assert ModelNonDataclass._class_immutable == set(['_immutable'])
+
+    def test_get_mutable_non_dataclass_half_default_inheritance(self):
+        class BaseModelNonDataclass(BaseModel):
+            a: int = 0
+
+        class ModelNonDataclass(BaseModelNonDataclass):
+            __mutable__ = ('b')
+
+            b: str
+            _immutable: float = 0.0
+
+        assert BaseModelNonDataclass._class_mutable == set(['a'])
+        assert not BaseModelNonDataclass._class_immutable
+        assert ModelNonDataclass._class_mutable == set(['a', 'b'])
+        assert ModelNonDataclass._class_immutable == set(['_immutable'])
 
     def test_modify_mutable(self, a):
         old_value_a, old_value_b = a.a, a.b
