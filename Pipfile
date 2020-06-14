@@ -4,8 +4,7 @@ url = "https://pypi.org/simple"
 verify_ssl = true
 
 [dev-packages]
-coverage = "*"
-mypy = "*"
+coverage = {extras = ["toml"], version = "*"}
 flake8 = "*"
 yapf = "*"
 rope = "*"
@@ -18,12 +17,19 @@ wheel = "*"
 sphinx = "*"
 doc8 = "*"
 sphinx-rtd-theme = "*"
-m2r = "*"
+black = "==19.10b0"
+aiohttp = "*"
+darglint = "*"
+pytest-black = "*"
+isort = "*"
 
 [packages]
 restio = {editable = true,path = "."}
 
+[requires]
+python_version = "3.8"
+
 [scripts]
-test = "python tests/test.py"
+test = "pytest"
 docs = "sphinx-build -b html docs/source docs/build"
 build = "python setup.py sdist bdist_wheel"

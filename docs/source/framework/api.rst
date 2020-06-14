@@ -7,6 +7,9 @@ Model
 .. automodule:: restio.model
    :members:
 
+.. automodule:: restio.fields
+   :members:
+
 
 Data Access Object
 ^^^^^^^^^^^^^^^^^^

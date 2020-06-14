@@ -1,144 +1,211 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
+from contextvars import ContextVar
 from enum import IntEnum, auto
 from functools import wraps
-from typing import (AsyncGenerator, AsyncIterator, Dict, List, Optional, Set,
-                    Tuple, Type, cast, overload)
+from typing import (
+    Any,
+    AsyncGenerator,
+    AsyncIterator,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+    TypeVar,
+    cast,
+)
 
-from .cache import ModelCache, QueryCache
-from .dao import (BaseDAO, DAOTask, DAOTaskCallable,
-                  check_dao_implemented_method)
-from .graph import DependencyGraph, NavigationDirection, Node, Tree
-from .model import MODEL_UPDATE_EVENT, BaseModel, ValueKey, _check_model_type
-from .query import BaseQuery
-from .state import ModelState, ModelStateMachine, Transition
+from restio.cache import ModelCache, QueryCache
+from restio.dao import BaseDAO, DAOTask, DAOTaskCallable, check_dao_implemented_method
+from restio.fields.base import Field, FrozenType, T_co
+from restio.graph import (
+    DependencyGraph,
+    NavigationDirection,
+    NavigationType,
+    Node,
+    Tree,
+)
+from restio.model import (
+    MODEL_PRE_UPDATE_EVENT,
+    MODEL_UPDATE_EVENT,
+    BaseModel,
+    _check_model_type,
+)
+from restio.query import BaseQuery
+from restio.state import ModelState, ModelStateMachine, Transition
+
+ModelType = TypeVar("ModelType", bound=BaseModel, covariant=True)
 
 
 class PersistencyStrategy(IntEnum):
     """
     Defines the strategy of error handling during a Transaction `commit`.
 
-    INTERRUPT_ON_ERROR (default):
-        The transaction will be interrupted if any operation made by
-        a DAO throws an exception. The operations already performed
-        will be persisted on local cache, and the on-going tasks in
-        the other dependency trees will be finalized. The commit
-        operation will hang until all running tasks finalize, then a
-        list of all DAOTask's will be returned by the `commit`. This
-        is the recommended approach.
+    - INTERRUPT_ON_ERROR (default):
+        The Transaction will be interrupted if any operation made by a DAO throws an
+        exception. The operations already performed will be persisted on local cache,
+        and the on-going tasks in the other dependency trees will be finalized. The
+        commit operation will hang until all running tasks finalize, then a list of all
+        DAOTask's will be returned by the `commit`. This is the recommended approach.
 
-    CONTINUE_ON_ERROR:
-        The transaction will continue processing all models in the
-        dependency tree that have been marked for modification. The
-        framework will persist on local cache only the models that
-        have been successfuly synchronized to the remote store. No
+    - CONTINUE_ON_ERROR:
+        The Transaction will continue processing all models in the dependency tree that
+        have been marked for modification. The framework will persist on local cache
+        only the models that have been successfuly synchronized to the remote store. No
         cancellation will be done.
     """
+
     INTERRUPT_ON_ERROR = auto()
     CONTINUE_ON_ERROR = auto()
 
 
 class TransactionState(IntEnum):
     """
-    Stores the current state of the transaction. The state is used by the transaction
+    Stores the current state of the Transaction. The state is used by the Transaction
     scope for decision making when particular actions are being executed.
 
     - STANDBY: The transaction has been created and is not performing any action.
     - GET: The transaction is currently acquiring a model from the remote server.
+    - ADD: The transaction is currently adding a new model to the internal cache.
     - COMMIT: The transaction is performing a commit.
     - ROLLBACK: The transaction is performing a rollback.
     """
+
     STANDBY = auto()
     GET = auto()
+    ADD = auto()
     COMMIT = auto()
     ROLLBACK = auto()
+
+
+DecoratorFunc = TypeVar("DecoratorFunc")
 
 
 def transactionstate(state: TransactionState):
     """
     Decorates the current method to define the state of the transaction
     during its execution.
-    """
-    def deco(func):
-        @wraps(func)
-        def wrapper(self, *args, **kwargs):
-            previous = self._state
-            self._state = state
 
-            try:
-                result = func(self, *args, **kwargs)
-                return result
-            except Exception:
-                raise
-            finally:
-                self._state = previous
+    # noqa: DAR301 yield
+
+    :param state: The state to be set to the transaction while the operation
+                  is in place.
+    :return: The function decorator.
+    """
+
+    @contextmanager
+    def _context(t: Transaction):
+        try:
+            token = t._state.set(state)
+            yield
+        finally:
+            t._state.reset(token)
+
+    def deco(func: DecoratorFunc) -> DecoratorFunc:
+        if not asyncio.iscoroutinefunction(func):
+
+            @wraps(func)
+            def wrapper(self, *args, **kwargs):
+                with _context(self):
+                    return func(self, *args, **kwargs)
+
+        else:
+
+            @wraps(func)
+            async def wrapper(self, *args, **kwargs):
+                with _context(self):
+                    return await func(self, *args, **kwargs)
 
         return wrapper
+
     return deco
 
 
 class Transaction:
     """
-    Module to manage an abstracted Transaction scope of a REST API server.
+    Manages a local transaction scope for interfacing with a remote REST API server.
 
-    The transaction will manage an internal cache where it stores the models
-    retrieved from or persisted to the remote REST API. Models are uniquely
-    identified by their internal id and their primary keys. Trying to retrieve
-    the same model twice within the same scope will make the transaction return
-    the cached models instead of querying the remote server.
+    The Transaction will manage an internal cache where it stores the models retrieved
+    from or persisted to the remote REST API. Models are uniquely identified by their
+    internal id and their primary keys. Trying to retrieve the same model twice within
+    the same scope will make the Transaction return the cached models instead of
+    querying the remote server again.
 
-    When all models have been modified, created or deleted, the transaction can
-    be persisted on the remote server with `commit`.
+    When all models have been modified, created or deleted, the Transaction can be
+    persisted on the remote server with `commit`.
 
-    The transaction should know how to manipulate each model type by registering
-    the respective DAOs with `register_dao`. When asked to `get`, `add` or
-    `remove` a model, the Transaction  will look up for the DAO associated with
-    the provided model type. If the DAOs raise exeptions during `commit`, then
-    the transaction will handle the erros based on the predefined
-    PersistenceStrategy provided during instantiation.
+    The Transaction should know how to manipulate each model type by registering the
+    respective DAOs with `register_dao`. When asked to `get`, `add` or `remove` a
+    model, the Transaction will look up for the DAO associated with the provided model
+    type. If the DAO raises an exeption during `commit`, then the Transaction will
+    handle the erros based on the predefined PersistenceStrategy provided during
+    instantiation.
 
-    `get` operations will be executed on spot, while `add`, `remove` and `_update`
-    will be scheduled to run during `commit`. The transaction will decide in which
-    order to manipulate each model based on dependency trees generated in runtime.
-    The transaction will try to parallelize the calls to the remote server as much
-    as possible to guarantee data consistency. The dependency trees vary with the
-    current internal state of each model instance before commit. The state of the
-    models is managed by the transaction itself.
+    `get` operations will be executed on spot, while `add`, `remove` and `_update` will
+    be scheduled to run during `commit`. The Transaction will decide in which order to
+    manipulate each model based on dependency trees generated in runtime. The
+    Transaction will try to parallelize the calls to the remote server as much as
+    possible to guarantee data consistency. The dependency trees vary with the current
+    internal state of each model instance as soon as `commit` is called. The new state
+    of each model is managed by the Transaction itself during the commit.
 
-    After a `commit` is done, all models that have been persisted on the remote
-    server successfully will be persisted on the local cache, even if errors
-    occur in parallel tasks. DAOs are allowed to modify the models locally
-    during `add` or `update`, since the transaction will pick up the final values
-    and persist them on local cache.
+    When called by a Transaction, DAO instances are allowed to modify the models
+    locally during `get`, `add` or `update` without causing the models' states to
+    change, and without being affected by the defined frozen attribute of each field.
+
+    After a `commit` is done, all models that have been persisted on the remote server
+    successfully will be persisted on the local cache, even if errors occur in other
+    parallel tasks.
     """
+
     _model_cache: ModelCache
     _query_cache: QueryCache
-    _daos: Dict[Type[BaseModel], BaseDAO]
+    _daos: Dict[Type[ModelType], BaseDAO]
     _strategy: PersistencyStrategy
-    _state: TransactionState
+    _state: ContextVar[TransactionState]
     _model_lock: Dict[str, asyncio.Lock]
 
-    def __init__(self, strategy=PersistencyStrategy.INTERRUPT_ON_ERROR):
+    def __init__(
+        self, strategy: PersistencyStrategy = PersistencyStrategy.INTERRUPT_ON_ERROR
+    ):
         self._model_cache = ModelCache()
         self._query_cache = QueryCache()
         self._daos = {}
         self._strategy = strategy
-        self._state = TransactionState.STANDBY
+        self._state = ContextVar(
+            "TransactionStateContext", default=TransactionState.STANDBY
+        )
         self._model_lock = {}
 
     def reset(self):
         """
         Resets the internal cache. All references to models are lost.
         """
+        for model in self._model_cache.get_all_models():
+            self.unregister_model(model)
+
         self._model_cache.reset()
         self._query_cache.reset()
         self._model_lock = {}
 
-    def register_dao(self, dao: BaseDAO):
+    @property
+    def state(self) -> TransactionState:
         """
-        Registers a DAO instance to the transaction and maps its model
-        type in the local dictionary.
+        Returns the state in which the Transaction is within the current context.
+
+        :return: The TransactionState set for the context.
+        """
+        return self._state.get()
+
+    def register_dao(self, dao: BaseDAO[ModelType]):
+        """
+        Registers a DAO instance to the transaction and maps its model type in the
+        local dictionary.
 
         :param dao: The DAO instance.
         """
@@ -146,184 +213,119 @@ class Transaction:
 
         if model_type not in self._daos:
             self._daos[model_type] = dao
+            dao.transaction = self
 
-    def get_dao(self, model_type: Type[BaseModel]) -> BaseDAO:
-        """Returns the DAO associated with the `model_type`.
+    def get_dao(self, model_type: Type[ModelType]) -> BaseDAO[ModelType]:
+        """
+        Returns the DAO associated with `model_type`.
 
         :param model_type: The BaseModel subclass.
-        :raises RuntimeError: If no DAO has been associated to the provided
-                              `model_type`.
-        :return: The DAO instance, if found.
+        :raises NotImplementedError: If no DAO has been associated to the provided
+                                     `model_type`.
+        :return: The DAO instance.
         """
         dao = self._daos.get(model_type)
         if dao is None:
-            raise NotImplementedError(f"Model type `{model_type.__name__}` does not contain a DAO registered.")
+            raise NotImplementedError(
+                f"Model type `{model_type.__name__}` does not contain a DAO"
+                " registered."
+            )
 
         return dao
 
-    def _register_model(self, model: BaseModel, force: bool = False, register_children: bool = True):
-        self._model_cache.register(model, force)
-        self._subscribe_update(model)
-
-        children = model.get_children(recursive=True)
-        if register_children:
-            for child in children:
-                self._model_cache.register(child, force)
-                self._subscribe_update(child)
-        elif children:
-            for child in children:
-                if not self._model_cache.get_by_internal_id(child.__class__, child._internal_id):
-                    raise RuntimeError(
-                        f"Model of id `{child._internal_id}` ({child.__class__.__name__}) "
-                        f"is a child of `{model._internal_id}` ({model.__class__.__name__})"
-                        " and is not registered in cache."
-                    )
-
-    def _subscribe_update(self, model: BaseModel):
-        model._listener.subscribe(MODEL_UPDATE_EVENT, self._update)
-
-    def _unsubscribe_update(self, model: BaseModel):
-        model._listener.unsubscribe(MODEL_UPDATE_EVENT, self._update)
-
-    def register_model(self, model: BaseModel, force: bool = False, register_children: bool = True):
-        """
-        Registers the `model` in the internal cache. If the model is already
-        registered and `force` is False, then the operation is skipped.
-
-        :param model: The model instance to be registered.
-        :param force: Forces the operation if True, skips otherwise.
-                      Defaults to False.
-        :param register_children: If True, also registers children objects
-                                  of the model in the local cache recursively.
-                                  Skips children if False. Defaults to True.
-        :raises RuntimeError: When `register_children` is False and a child
-                              of the model is not registered.
-        """
-        if not model:
-            return
-
-        self._register_model(model, force, register_children)
-
-    async def register_query(
-        self, query: BaseQuery, models: List[BaseModel], force: bool = False, register_children: bool = True
-    ):
-        """
-        Registers the `query` and its `models` in the internal cache.
-        If any of the models is already registered and `force` is False,
-        then they are not persisted into the model cache again.
-
-        :param model: The model instance to be registered.
-        :param force: Forces the operation if True, skips otherwise.
-                      Defaults to False.
-        :param register_children: If True, also registers children objects
-                                  of the model in the local cache recursively.
-                                  Skips children if False. Defaults to True.
-        :raises RuntimeError: When `register_children` is False and a child
-                              of the model is not registered.
-        """
-        registered_models: List[BaseModel] = []
-
-        for model in models:
-            self._register_model(model, force, register_children)
-            # assuming the previous
-            registered_model = await self.get(type(model), model.get_keys())
-
-            if registered_model:
-                registered_models.append(registered_model)
-
-        self._query_cache.register(query, registered_models)
-
-    @overload
-    async def get(self, model_type: Type[BaseModel], value: Tuple[ValueKey, ...]) -> Optional[BaseModel]:
-        ...
-
-    @overload
-    async def get(self, model_type: Type[BaseModel], value: List[ValueKey]) -> Optional[BaseModel]:
-        ...
-
-    @overload
-    async def get(self, model_type: Type[BaseModel], value: ValueKey) -> Optional[BaseModel]:
-        ...
-
     @transactionstate(TransactionState.GET)
-    async def get(self, model_type, value):
+    async def get(self, model_type: Type[ModelType], **keys) -> ModelType:
         """
-        Tries retrieving the model of type `model_type` and primary key `value`
-        from local cache. If not found, then calls the `get` method of the DAO
-        associated to the `model_type`. Returns None if no model is found.
+        Tries retrieving the model of type `model_type` and primary keys `keys` from
+        the local cache. If not found, then calls the `get` method of the DAO
+        associated to the `model_type`.
 
         :param model_type: The BaseModel subclass representing the model.
-        :param value: The primary key collection that represents the model.
-        :raises RuntimeError: When no DAO is associated with the `model_type`.
-        :return: The model instance if found, None otherwise.
+        :param keys: The primary key values that represents the model.
+        :raises ValueError: When a primary key value is missing.
+        :raises RuntimeError: When no model is found with the given primary keys.
+        :return: The model instance.
         """
-        if isinstance(value, list):
-            value = tuple(value)
+        pks_dict: Dict[str, Any] = {}
+        for pk in model_type._meta.primary_keys.values():
+            if pk.name not in keys:
+                raise ValueError(
+                    f"Expected value for primary key `{pk.name}` of model type "
+                    f" {model_type.__class__.__name__} not provided."
+                )
+            pks_dict[pk.name] = keys[pk.name]
 
-        if not isinstance(value, tuple):
-            value = (value,)
-
-        model_lock = self._get_model_lock(model_type, value)
+        model_lock = self._get_model_lock(model_type, **pks_dict)
 
         async with model_lock:
-            model: BaseModel = self._model_cache.get_by_primary_key(model_type, value)
+            pks: Tuple[Any, ...] = tuple(pks_dict.values())
+            model: Optional[ModelType] = self._model_cache.get_by_primary_key(
+                model_type, pks
+            )
             if model:
                 return model
 
             dao: BaseDAO = self.get_dao(model_type)
+            check_dao_implemented_method(dao.get)
 
-            model = cast(model_type, await dao.get(value))
+            model = cast(model_type, await dao.get(**pks_dict))
             if model:
-                model._state = ModelStateMachine.transition(Transition.EXISTING_OBJECT, None)
-                self.register_model(model, force=True)
+                model._state = ModelStateMachine.transition(
+                    Transition.GET_OBJECT, model._state
+                )
+                self.register_model(model)
                 return model
 
-        return None
+        keys_str = ", ".join("{}={}".format(k, str(v)) for k, v in pks_dict.items())
+        raise RuntimeError(
+            f"No model of type `{model_type.__class__.__name__}`` with primary keys "
+            f"({keys_str}) was found"
+        )
 
-    def _get_model_lock(self, model_type: Type[BaseModel], value: Tuple[ValueKey, ...]) -> asyncio.Lock:
-        lock_hash = f"{model_type.__name__}/{str(value)}"
-        self._model_lock.setdefault(lock_hash, asyncio.Lock())
-        return self._model_lock[lock_hash]
+    def _get_model_lock(self, model_type: Type[ModelType], **keys) -> asyncio.Lock:
+        keys_str = ", ".join("{}={}".format(k, str(v)) for k, v in keys.items())
+        lock_hash = f"{model_type.__name__}/{str(keys_str)}"
+        return self._model_lock.setdefault(lock_hash, asyncio.Lock())
 
-    def add(self, model: BaseModel) -> bool:
+    @transactionstate(TransactionState.ADD)
+    def add(self, model: ModelType):
         """
-        Adds new `model` to the local cache and schedules for adding in the remote
+        Adds the new `model` to the local cache and schedules for adding in the remote
         server during `commit`.
 
         :param model: The model instance.
         :raises RuntimeError: If the model has been already registered in cache.
-        :return: True if the model is scheduled for adding, False otherwise.
         """
         _check_model_type(model)
 
         dao = self.get_dao(type(model))
         check_dao_implemented_method(dao.add)
 
-        model_cache = self._model_cache.get_by_internal_id(model.__class__, model._internal_id)
+        model_cache = self._model_cache.get_by_internal_id(
+            model.__class__, model._internal_id
+        )
         if model_cache:
-            raise RuntimeError(f"Model of id `{model._internal_id}` is already registered in internal cache.")
+            raise RuntimeError(
+                f"Model of id `{model._internal_id}` is already registered in internal"
+                " cache."
+            )
 
-        keys = model.get_keys()
-        if keys:
-            model_cache = self._model_cache.get_by_primary_key(model.__class__, keys)
+        obj_type, obj_keys, _ = self._model_cache._get_type_key_hash(model)
+        if obj_keys:
+            model_cache = self._model_cache.get_by_primary_key(obj_type, obj_keys)
             if model_cache:
-                raise RuntimeError(f"Model with keys `{keys}` is already registered in internal cache.")
+                raise RuntimeError(
+                    f"Model with keys `{obj_keys}` is already registered in internal"
+                    " cache."
+                )
 
-        model._state = ModelStateMachine.transition(Transition.ADD_OBJECT, None)
-        self._register_model(model, force=False, register_children=False)
+        for field in model._meta.fields.values():
+            self._check_frozen_field(model, field)
 
-        return model._state == ModelState.NEW
+        model._state = ModelStateMachine.transition(Transition.ADD_OBJECT, model._state)
+        self.register_model(model, force=False)
 
-    def _assert_cache_internal_id(self, model: BaseModel) -> BaseModel:
-        _check_model_type(model)
-
-        model_cache = self._model_cache.get_by_internal_id(model.__class__, model._internal_id)
-        if not model_cache:
-            raise RuntimeError(f"Model with internal id {model._internal_id} not found on cache.")
-
-        return model_cache
-
-    def remove(self, model: BaseModel) -> bool:
+    def remove(self, model: ModelType) -> bool:
         """
         Schedules model for removal on the remote server during `commit`.
 
@@ -334,15 +336,81 @@ class Transaction:
         check_dao_implemented_method(dao.remove)
 
         model_cache = self._assert_cache_internal_id(model)
-        model_cache._state = ModelStateMachine.transition(Transition.REMOVE_OBJECT, model_cache._state)
+        model_cache._state = ModelStateMachine.transition(
+            Transition.REMOVE_OBJECT, model_cache._state
+        )
 
         return model_cache._state == ModelState.DELETED
+
+    def _assert_cache_internal_id(self, model: ModelType) -> ModelType:
+        _check_model_type(model)
+
+        model_cache = self._model_cache.get_by_internal_id(
+            model.__class__, model._internal_id
+        )
+        if not model_cache:
+            raise RuntimeError(
+                f"Model with internal id {model._internal_id} not found on cache."
+            )
+
+        return model_cache
+
+    def _pre_update(self, model: ModelType, field: Field[T_co], value: T_co):
+        self._check_frozen_field(model, field)
+
+    def _check_frozen_field(self, model: ModelType, field: Field[T_co]):
+        # During COMMIT, ROLLBACK and GET, all changes to models
+        # should be allowed, regardless of the field being or not frozen
+        if self.state in (
+            TransactionState.COMMIT,
+            TransactionState.ROLLBACK,
+            TransactionState.GET,
+        ):
+            return
+
+        if field.frozen == FrozenType.NEVER:
+            return
+
+        frozen_state: FrozenType
+        if (
+            model._state == ModelState.CLEAN
+            or model._state == ModelState.DIRTY
+            or model._state == ModelState.DELETED
+        ):
+            frozen_state = FrozenType.UPDATE
+        elif model._state == ModelState.NEW:
+            frozen_state = FrozenType.CREATE
+        elif self.state == TransactionState.ADD:
+            frozen_state = FrozenType.CREATE
+        else:  # DISCARDED
+            return
+
+        if field.frozen & frozen_state:  # type: ignore
+            if self.state == TransactionState.ADD:
+                # this will kick in if a model is being registered to be added,
+                # but a frozen field has a value different from its default
+                field_value = model.fields[field.name]
+                if field_value != field.default:
+                    raise ValueError(
+                        f"Field {field._field_name(model)} is frozen and its value"
+                        " cannot be different from its default."
+                    )
+            else:
+                # all other update use cases
+                raise ValueError(
+                    f"Field {field._field_name(model)} is frozen and cannot be"
+                    " modified."
+                )
 
     def _update(self, model: BaseModel) -> bool:
         # During COMMIT, ROLLBACK and GET, all changes to models
         # should be permanent, therefore we persist any change
         # and avoid changing the state of the models
-        if self._state in (TransactionState.COMMIT, TransactionState.ROLLBACK, TransactionState.GET):
+        if self.state in (
+            TransactionState.COMMIT,
+            TransactionState.ROLLBACK,
+            TransactionState.GET,
+        ):
             model._persist()
             return False
 
@@ -352,7 +420,9 @@ class Transaction:
         if new_state in (ModelState.DIRTY, ModelState.NEW):
             updated = bool(model._persistent_values)
             if not updated and new_state == ModelState.DIRTY:
-                new_state = ModelStateMachine.transition(Transition.CLEAN_OBJECT, model._state)
+                new_state = ModelStateMachine.transition(
+                    Transition.CLEAN_OBJECT, model._state
+                )
             elif new_state == ModelState.NEW:
                 model._persist()
 
@@ -363,25 +433,33 @@ class Transaction:
         model._state = new_state
         return updated
 
-    async def query(self, query: BaseQuery, force: bool = False) -> List[BaseModel]:
+    async def query(
+        self, query: BaseQuery[ModelType], force: bool = False
+    ) -> Tuple[ModelType, ...]:
         """
-        Runs custom query `query` and registers results on local cache.
+        Runs custom query `query` and registers results in the local cache.
 
-        When new queries are run for the first time, the results are
-        persisted into the query and model caches. Models that already
-        exist in cache (by checking their primary keys) are not registered
-        again (even if `force` = True), to preserve the information
-        already stored and avoid discrepancies on the business level.
+        When new queries are run for the first time, the results are persisted into the
+        query and model caches. Models that already exist in cache (by checking their
+        primary keys) are not registered again (even if `force=True`), to preserve the
+        information already stored and avoid discrepancies.
 
-        The returning values from the query will contain only the models
-        that are registered in the cache. Discarded models are replaced
-        with their cached version.
+        The returning values from the query will contain only the models that are
+        registered in the cache. Discarded models are replaced with their cached
+        version.
+
+        This method will always return an ordered tuple containing all the values as
+        they were registered in cache, even when the return type of the query is
+        another iterable other than tuple.
 
         :param query: The query instance to be executed.
-        :param force: Forces running the query even if it has been
-                      already cached.
+        :param force: Forces running the query even if it has been already cached.
+        :raises TypeError: When the provided `query` is not a BaseQuery.
         :return: The list of models retrieved by the query.
         """
+        if not isinstance(query, BaseQuery):
+            raise TypeError("The provided `obj` should be an instance of BaseQuery")
+
         if not force:
             cached_results = self._query_cache.get(query)
             if cached_results is not None:
@@ -401,36 +479,92 @@ class Transaction:
         # values stored for the query in cache
         return self._query_cache.get(query)  # type: ignore
 
-    def _get_models_by_state(self, state: Tuple[ModelState, ...], models: Optional[Set[BaseModel]] = None):
-        models = self._model_cache.get_all_models() if not models else models
-        return set([model for model in models if model._state in state])
+    def register_model(self, model: ModelType, force: bool = False) -> bool:
+        """
+        Registers the `model` in the internal cache. If the model is already registered
+        and `force` is False, then the operation is skipped.
 
-    def _get_models_to_add(self, models: Optional[Set[BaseModel]] = None) -> Set[BaseModel]:
-        return self._get_models_by_state((ModelState.NEW,), models)
+        :param model: The model instance to be registered.
+        :param force: Forces the operation if True, skips otherwise. Defaults to False.
+        :raises RuntimeError: When at least one child of the provided model is not yet
+                              registered in the cache.
+        :return: True if the model has been registered, False if it has been skipped.
+        """
 
-    def _get_models_to_update(self, models: Optional[Set[BaseModel]] = None) -> Set[BaseModel]:
-        return self._get_models_by_state((ModelState.DIRTY,), models)
+        children = model.get_children(recursive=True)
+        for child in children:
+            if not self._model_cache.get_by_internal_id(
+                child.__class__, child._internal_id
+            ):
+                raise RuntimeError(
+                    f"Model of id `{child._internal_id}` ({child.__class__.__name__}) "
+                    f"is a child of `{model._internal_id}` ({model.__class__.__name__})"
+                    " and is not registered in cache."
+                )
 
-    def _get_models_to_remove(self, models: Optional[Set[BaseModel]] = None) -> Set[BaseModel]:
-        return self._get_models_by_state((ModelState.DELETED,), models)
+        registered = self._model_cache.register(model, force)
+        if registered:
+            self._subscribe_update(model)
+            model._state = ModelStateMachine.transition(
+                Transition.GET_OBJECT, model._state
+            )
 
-    def _get_processed_models(self, models: Optional[Set[BaseModel]] = None) -> Set[BaseModel]:
-        return self._get_models_by_state((ModelState.CLEAN, ModelState.DISCARDED), models)
+        return registered
 
-    def get_transaction_models(self, models: Optional[Set[BaseModel]] = None) -> Set[BaseModel]:
-        return self._get_models_by_state((ModelState.NEW, ModelState.DIRTY, ModelState.DELETED), models)
+    def unregister_model(self, model: ModelType):
+        """
+        Unregisters model from the internal cache.
 
-    def _check_deleted_models(self, models: Optional[Set[BaseModel]] = None):
-        models = set(self._model_cache._id_cache.values()) if not models else models
-        nodes = DependencyGraph._get_connected_nodes(models)
-        for node in (n for n in nodes if n.node_object._state == ModelState.DELETED):
-            for parent_node in node.get_parents(recursive=True):
-                parent_model: BaseModel = parent_node.node_object
-                if parent_model._state not in (ModelState.DELETED, ModelState.DISCARDED):
-                    raise RuntimeError(
-                        "Inconsistent tree. Models that are referred by "
-                        "other models cannot be deleted."
-                    )
+        :param model: The model instance to be unregistered.
+        """
+        try:
+            self._model_cache.unregister(model)
+        except ValueError:
+            pass
+        finally:
+            self._unsubscribe_update(model)
+
+    def _subscribe_update(self, model: ModelType):
+        model._listener.subscribe(MODEL_PRE_UPDATE_EVENT, self._pre_update)
+        model._listener.subscribe(MODEL_UPDATE_EVENT, self._update)
+
+    def _unsubscribe_update(self, model: ModelType):
+        model._listener.unsubscribe(MODEL_PRE_UPDATE_EVENT, self._pre_update)
+        model._listener.unsubscribe(MODEL_UPDATE_EVENT, self._update)
+
+    async def register_query(
+        self,
+        query: BaseQuery[ModelType],
+        models: Iterable[ModelType],
+        force: bool = False,
+    ):
+        """
+        Registers the `query` and its `models` in the internal cache. If any of the
+        models is already registered and `force` is False, then they are not persisted
+        into the model cache again.
+
+        All query results are stored as tuples, to preserve the order in an immutable
+        structure.
+
+        :param query: The query instance to be registered.
+        :param models: The iterable containing the models to be registered as a result
+                       of the `query`. The order of iteration is preserved in the cache
+                       as a tuple.
+        :param force: Forces the operation if True, skips otherwise. Defaults to False.
+        """
+        registered_models: Tuple[ModelType, ...] = tuple()
+
+        for model in models:
+            if self._model_cache.has_model(model):
+                registered_model = await self.get(type(model), **model.primary_keys)
+            else:
+                self.register_model(model, force)
+                registered_model = model
+
+            if registered_model:
+                registered_models += (registered_model,)
+
+        self._query_cache.register(query, registered_models)
 
     @transactionstate(TransactionState.COMMIT)
     async def commit(self) -> List[DAOTask]:
@@ -438,7 +572,6 @@ class Transaction:
         Persists all models on the remote server. Models that have been successfully
         submited are also persisted on the local cache by the end of the operation.
 
-        :raises RuntimeError: When model doesn't have a DAO associated with its type.
         :return: A list containing all DAOTask's performed by the commit, in the order
                  in which the operations have been finalized.
         """
@@ -448,8 +581,9 @@ class Transaction:
         models_to_update = self._get_models_to_update(cached_values)
         models_to_remove = self._get_models_to_remove(cached_values)
 
-        all_models: Set[BaseModel] = models_to_add.union(models_to_update) \
-                                                  .union(models_to_remove)
+        all_models: Set[BaseModel] = models_to_add.union(models_to_update).union(
+            models_to_remove
+        )
 
         self._check_deleted_models(models_to_remove)
 
@@ -462,9 +596,9 @@ class Transaction:
         ]
 
         directions: List[NavigationDirection] = [
-            NavigationDirection.LEAVES_TO_ROOTS,
-            NavigationDirection.LEAVES_TO_ROOTS,
-            NavigationDirection.ROOTS_TO_LEAVES
+            NavigationType.LEAVES_TO_ROOTS,
+            NavigationType.LEAVES_TO_ROOTS,
+            NavigationType.ROOTS_TO_LEAVES,
         ]
 
         results: List[DAOTask] = []
@@ -473,14 +607,32 @@ class Transaction:
                 results.append(task)
         finally:
             # clean up models that were discarded
-            discarded_models: Set[BaseModel] = set(m for m in all_models if m._state == ModelState.DISCARDED)
+            discarded_models: Set[BaseModel] = set(
+                m for m in all_models if m._state == ModelState.DISCARDED
+            )
             for model in discarded_models:
-                self._model_cache.unregister(model)
-                self._unsubscribe_update(model)
+                self.unregister_model(model)
             self.update_cache()
         return results
 
-    async def _process_all_graphs(self, graphs: List[DependencyGraph], directions: List[NavigationDirection]):
+    def _check_deleted_models(self, models: Optional[Set[BaseModel]] = None):
+        models = set(self._model_cache._id_cache.values()) if not models else models
+        nodes = DependencyGraph._get_connected_nodes(models)
+        for node in (n for n in nodes if n.node_object._state == ModelState.DELETED):
+            for parent_node in node.get_parents(recursive=True):
+                parent_model: BaseModel = parent_node.node_object
+                if parent_model._state not in (
+                    ModelState.DELETED,
+                    ModelState.DISCARDED,
+                ):
+                    raise RuntimeError(
+                        "Inconsistent tree. Models that are referred by "
+                        "other models cannot be deleted."
+                    )
+
+    async def _process_all_graphs(
+        self, graphs: List[DependencyGraph], directions: List[NavigationDirection]
+    ):
         cancel = False
 
         for graph, direction in zip(graphs, directions):
@@ -510,11 +662,14 @@ class Transaction:
                 finally:
                     if model:
                         model._persist()
-                        model._state = ModelStateMachine.transition(Transition.PERSIST_OBJECT, model._state)
+                        model._state = ModelStateMachine.transition(
+                            Transition.PERSIST_OBJECT, model._state
+                        )
                     yield dao_task
 
-    async def _process_all_trees(self, graph: DependencyGraph, direction: NavigationDirection) \
-            -> AsyncIterator[DAOTask]:
+    async def _process_all_trees(
+        self, graph: DependencyGraph, direction: NavigationDirection
+    ) -> AsyncIterator[DAOTask]:
 
         all_results: List[DAOTask] = []
 
@@ -527,19 +682,23 @@ class Transaction:
 
         # the following block will guarantee that the trees are triggered in parallel
         # and operations run as fast as possible
-        tree_iterate_tasks = [asyncio.create_task(iterate_tree(t, direction)) for t in graph.trees]
+        tree_iterate_tasks = [
+            asyncio.create_task(iterate_tree(t, direction)) for t in graph.trees
+        ]
         for iterate_task in asyncio.as_completed(tree_iterate_tasks):
             all_results.extend(await iterate_task)
 
-        # with the parallelization, we lost control of the order in which the models were
-        # processe between the trees, so we need to reorder and yield back
+        # with the parallelization, we lost control of the order in which the models
+        # were processe between the trees, so we need to reorder and yield back
         for x in sorted(all_results):
             yield x
 
-    async def _process_tree(self, tree: Tree, direction: NavigationDirection) -> AsyncGenerator[DAOTask, None]:
-        navigate_queue: asyncio.Queue[Node] = asyncio.Queue()
-        finished_queue: asyncio.Queue[DAOTask] = asyncio.Queue()
-        tasks: List[asyncio.Task[DAOTask]] = []
+    async def _process_tree(
+        self, tree: Tree[ModelType], direction: NavigationDirection
+    ) -> AsyncGenerator[DAOTask, None]:
+        navigate_queue: asyncio.Queue[Node[ModelType]] = asyncio.Queue()
+        finished_queue: asyncio.Queue[DAOTask[ModelType]] = asyncio.Queue()
+        tasks: List[asyncio.Task] = []
         cancel = False
 
         # collects nodes to be processed
@@ -548,7 +707,7 @@ class Transaction:
 
         # creates a task to handle the node and propagate
         # the values across the queues
-        async def node_task(node):
+        async def node_task(node) -> None:
             nonlocal cancel
             dao_task: DAOTask = nodes_callables[node]
 
@@ -586,7 +745,9 @@ class Transaction:
         while not finished_queue.empty():
             yield await finished_queue.get()
 
-    def _get_dao_tasks(self, nodes: Set[Node]) -> Dict[Node, DAOTask]:
+    def _get_dao_tasks(
+        self, nodes: Set[Node[ModelType]]
+    ) -> Dict[Node[ModelType], DAOTask[ModelType]]:
         callables = {}
 
         for node in nodes:
@@ -601,26 +762,60 @@ class Transaction:
                 model_callable = dao.update
             elif model._state == ModelState.DELETED:
                 model_callable = dao.remove
+            else:
+                continue
 
             callables[node] = DAOTask(node, model_callable)
 
         return callables
 
+    def update_cache(self):
+        """
+        Inspects all processed models during a commit an forces registering again.
+        This is mainly used to guarantee that models with changed primary keys have
+        been re-registered in the cache with the correct value.
+        """
+        models = self._get_clean_models()
+        for model in models:
+            self._model_cache.register(model, force=True)
+
     @transactionstate(TransactionState.ROLLBACK)
     def rollback(self):
         """
-        Discards all changes to the local cache. New models are discarded and
-        local changes to models retrieved from the remote are ignored.
+        Discards all changes from the local cache. New models are discarded and local
+        changes to models retrieved from the remote are ignored.
         """
         for model in self._model_cache.get_all_models():
-            model._state = ModelStateMachine.transition(Transition.ROLLBACK_OBJECT, model._state)
+            model._state = ModelStateMachine.transition(
+                Transition.ROLLBACK_OBJECT, model._state
+            )
             if model._state == ModelState.DISCARDED:
-                self._model_cache.unregister(model)
-                self._unsubscribe_update(model)
+                self.unregister_model(model)
             else:
                 model._rollback()
 
-    def update_cache(self):
-        models = self._get_processed_models()
-        for model in models:
-            self._model_cache.register(model, force=True)
+    def _get_models_to_add(
+        self, models: Optional[Set[BaseModel]] = None
+    ) -> Set[BaseModel]:
+        return self._get_models_by_state((ModelState.NEW,), models)
+
+    def _get_models_to_update(
+        self, models: Optional[Set[BaseModel]] = None
+    ) -> Set[BaseModel]:
+        return self._get_models_by_state((ModelState.DIRTY,), models)
+
+    def _get_models_to_remove(
+        self, models: Optional[Set[BaseModel]] = None
+    ) -> Set[BaseModel]:
+        return self._get_models_by_state((ModelState.DELETED,), models)
+
+    def _get_clean_models(
+        self, models: Optional[Set[BaseModel]] = None
+    ) -> Set[BaseModel]:
+        return self._get_models_by_state((ModelState.CLEAN,), models)
+
+    def _get_models_by_state(
+        self, state: Tuple[ModelState, ...], models: Optional[Set[BaseModel]] = None
+    ):
+        models = self._model_cache.get_all_models() if not models else models
+        return set(model for model in models if model._state in state)
