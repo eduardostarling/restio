@@ -8,10 +8,7 @@ trigger:
   - master
 
 pr:
-  branches:
-    include:
-      - feature/*
-      - bugfix/*
+  - master
 
 variables:
   pipenvVersion: '2018.11.26'
