@@ -6,20 +6,24 @@ from restio.query import query
 
 
 @query
-async def ArgsQuery(self, arg1: int, arg2: int = 2) -> Tuple[str, int]:
-    return (self, arg2)
+async def ArgsQuery(arg1: int, arg2: int = 2, *, transaction) -> Tuple[str, int]:
+    return (transaction, arg2)
 
 
 @query
-async def ArgsQuery2(self, arg1: int, arg2: int = 2) -> Tuple[str, int]:
-    return (self, arg2)
+async def ArgsQuery2(arg1: int, arg2: int = 2, *, transaction) -> Tuple[str, int]:
+    return (transaction, arg2)
+
+
+@query
+async def QueryNoTransaction(arg1: int) -> Tuple[int]:
+    return (arg1,)
 
 
 class TestQueryCache:
-
     def test_hash(self):
         q = ArgsQuery(arg1=1, arg2=2)
-        h = hash(tuple([q._get_function(), ('arg1', 1), ('arg2', 2)]))
+        h = hash((q._get_function(), ("arg1", 1), ("arg2", 2)))
 
         assert q.__hash__() == h
 
@@ -37,7 +41,7 @@ class TestQueryCache:
         assert q2 != q4
         assert q3 != q4
 
-        assert q1, (1 != 2)
+        assert q1, 1 != 2
 
     @pytest.mark.asyncio
     async def test_query_result(self):
@@ -45,17 +49,27 @@ class TestQueryCache:
 
         assert await q("text") == ("text", 2)
 
-    def test_invalid_query(self):
-        with pytest.raises(AttributeError):
-            @query
-            async def QueryNoSelf(arg1, arg2):
-                pass
+    @pytest.mark.asyncio
+    async def test_query_manual_transaction(self):
+        q = ArgsQuery(arg1=1, arg2=2, transaction="text")
 
-            QueryNoSelf(1, 2)
+        assert await q == ("text", 2)
 
-        with pytest.raises(AttributeError):
-            @query
-            async def QueryWrongSelf(arg1, arg2, self):
-                pass
+    @pytest.mark.asyncio
+    async def test_query_manual_transaction_overwrite(self):
+        q = ArgsQuery(arg1=1, arg2=2, transaction="text")
 
-            QueryWrongSelf(1, 2, "text")
+        assert await q("overwrite") == ("overwrite", 2)
+
+    @pytest.mark.asyncio
+    async def test_query_no_transaction(self):
+        q = QueryNoTransaction(arg1=1)
+
+        assert await q("text") == (1,)
+
+    @pytest.mark.asyncio
+    async def test_query_missing_transaction(self):
+        q = ArgsQuery(arg1=1, arg2=2)
+
+        with pytest.raises(RuntimeError):
+            await q

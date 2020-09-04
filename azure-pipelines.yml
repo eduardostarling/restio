@@ -1,51 +1,79 @@
+parameters:
+  - name: publish
+    displayName: Release new version
+    type: boolean
+    default: false
+
 trigger:
-- master
+  - master
+
+pr:
+  branches:
+    include:
+      - feature/*
+      - bugfix/*
+
+variables:
+  pipenvVersion: '2018.11.26'
+  mainPythonVersion: '3.8'
 
 jobs:
   # build job - only runs on latest supported python
   # version and publishes artifacts for further jobs
   - job: Build
+    displayName: Build
     pool:
       vmImage: 'ubuntu-latest'
-    strategy:
-      matrix:
-        Python38:
-          python.version: '3.8'
+    variables:
+      python.version: $(mainPythonVersion)
     steps:
-    - task: UsePythonVersion@0
-      displayName: 'Use Python $(python.version)'
-      inputs:
-        versionSpec: '$(python.version)'
+      - task: UsePythonVersion@0
+        displayName: 'Use Python $(python.version)'
+        inputs:
+          versionSpec: $(python.version)
+          addToPath: true
 
-    - script: |
-        python -m pip install --upgrade pip
-        python -m pip install pipenv
-        pipenv install --dev
-      displayName: 'Install dependencies for version $(python.version)'
+      - script: |
+          pip install pipenv==$(pipenvVersion)
+          pipenv sync --dev
+        displayName: 'Install dependencies for version $(python.version)'
 
-    - script: |
-        pipenv run docs
-      displayName: 'Build Documentation'
+      - script: |
+          pipenv run docs
+        displayName: 'Build Documentation'
 
-    - script: |
-        pipenv run build
-      displayName: 'Build Python Wheel'
+      - script: |
+          pipenv run build
+        displayName: 'Build Python Wheel'
 
-    - script: |
-        pipenv lock -r --dev > requirements.txt
-      displayName: 'Lock dependencies to requirements.txt'
+      - script: |
+          pipenv lock -r --dev --keep-outdated > requirements.txt
+        displayName: 'Lock dependencies to requirements.txt'
 
-    - task: PublishBuildArtifacts@1
-      displayName: 'Publish requirements.txt'
-      inputs:
-        pathtoPublish: '$(System.DefaultWorkingDirectory)/requirements.txt'
-        artifactName: PackageRequirements
+      - script: |
+          PACKAGE_VERSION=`python -c 'import restio; print(restio.__version__)'`
+          echo "Version is ${PACKAGE_VERSION}"
+          echo "##vso[task.setVariable variable=packageVersion;isOutput=true;]${PACKAGE_VERSION}"
+        name: PublishPackageVersion
+        displayName: Export package version
 
-    - task: PublishBuildArtifacts@1
-      displayName: 'Publish Python Wheel'
-      inputs:
-        pathtoPublish: '$(System.DefaultWorkingDirectory)/dist'
-        artifactName: PythonWheel
+      - task: PublishBuildArtifacts@1
+        displayName: 'Publish requirements.txt'
+        inputs:
+          pathtoPublish: '$(System.DefaultWorkingDirectory)/requirements.txt'
+          artifactName: PackageRequirements
+
+      - task: PublishBuildArtifacts@1
+        displayName: 'Publish Python Wheel'
+        inputs:
+          pathtoPublish: '$(System.DefaultWorkingDirectory)/dist'
+          artifactName: PythonWheel
+
+      - task: PublishBuildArtifacts@1
+        displayName: 'Publish documentation archive'
+        inputs:
+          pathtoPublish: '$(System.DefaultWorkingDirectory)/docs/build'
+          artifactName: ReadTheDocsFiles
 
   - job: Test
     pool:
@@ -60,77 +88,90 @@ jobs:
     dependsOn: Build
     condition: succeeded('Build')
     steps:
-    - task: UsePythonVersion@0
-      inputs:
-        versionSpec: '$(python.version)'
-      displayName: 'Use Python $(python.version)'
+      - task: UsePythonVersion@0
+        inputs:
+          versionSpec: '$(python.version)'
+          addToPath: true
+        displayName: 'Use Python $(python.version)'
 
-    - task: DownloadBuildArtifacts@0
-      displayName: 'Download requirements.txt'
-      inputs:
-        artifactName: PackageRequirements
-        downloadPath: $(System.DefaultWorkingDirectory)
+      - task: DownloadBuildArtifacts@0
+        displayName: 'Download requirements.txt'
+        inputs:
+          artifactName: PackageRequirements
+          downloadPath: $(System.DefaultWorkingDirectory)
 
-    - script: |
-        python -m pip install --upgrade pip
-        python -m pip install -r PackageRequirements/requirements.txt
-      displayName: 'Install dependencies for version $(python.version)'
+      - script:
+          pip install -r PackageRequirements/requirements.txt
+        displayName: 'Install dependencies for version $(python.version)'
 
-    - script: |
-        python tests/test.py
-      displayName: 'Run tests on version $(python.version)'
+      - script: |
+          pytest
+        displayName: 'Run tests'
 
-    - task: PublishTestResults@2
-      condition: succeededOrFailed()
-      inputs:
-        testResultsFiles: '**/test-*.xml'
-        testRunTitle: 'Publish test results for Python $(python.version)'
+      - task: PublishTestResults@2
+        condition: succeededOrFailed()
+        inputs:
+          testResultsFiles: '**/test-*.xml'
+          testRunTitle: 'Publish test results for Python $(python.version)'
 
-    - task: PublishCodeCoverageResults@1
-      inputs:
-        codeCoverageTool: Cobertura
-        summaryFileLocation: '$(System.DefaultWorkingDirectory)/coverage.xml'
-        reportDirectory: '$(System.DefaultWorkingDirectory)/htmlcov'
+      - task: PublishCodeCoverageResults@1
+        inputs:
+          codeCoverageTool: Cobertura
+          summaryFileLocation: '$(System.DefaultWorkingDirectory)/coverage.xml'
+
+      - script: |
+          flake8 .
+          isort --check-only .
+        displayName: 'Run linters'
 
   - job: Publish
+    displayName: Publish to PyPI and GitHub
     pool:
       vmImage: 'ubuntu-latest'
-    strategy:
-      matrix:
-        Python38:
-          python.version: '3.8'
     dependsOn:
       - Build
       - Test
-    condition: and(succeeded('Test'), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
+    condition: and(succeeded('Test'), eq(variables['Build.SourceBranch'], 'refs/heads/master'), eq('${{ parameters.publish }}', true))
+    variables:
+      python.version: $(mainPythonVersion)
+      tagVersion: $[ dependencies.Build.outputs['PublishPackageVersion.packageVersion'] ]
+      isPreRelease: $[ or(contains(variables['tagVersion'], 'a'), contains(variables['tagVersion'], 'b')) ]
     steps:
-    - checkout: none
+      - checkout: self
 
-    - task: UsePythonVersion@0
-      inputs:
-        versionSpec: '$(python.version)'
-      displayName: 'Use Python $(python.version)'
+      - task: UsePythonVersion@0
+        inputs:
+          versionSpec: '$(python.version)'
+        displayName: 'Use Python $(python.version)'
 
-    - task: DownloadBuildArtifacts@0
-      displayName: 'Download Python Wheel'
-      inputs:
-        artifactName: PythonWheel
-        downloadPath: $(System.DefaultWorkingDirectory)
+      - task: DownloadBuildArtifacts@0
+        displayName: 'Download Python Wheel'
+        inputs:
+          artifactName: PythonWheel
+          downloadPath: $(System.DefaultWorkingDirectory)
 
-    - script: |
-        python -m pip install --upgrade pip
-        python -m pip install wheel
-        python -m pip install twine
-      displayName: 'Install dependencies for version $(python.version)'
+      - script: |
+          pip install wheel twine
+        displayName: 'Install dependencies for version $(python.version)'
 
-    - task: TwineAuthenticate@1
-      displayName: 'Twine Authenticate'
-      inputs:
-        pythonUploadServiceConnection: restio
+      - task: TwineAuthenticate@1
+        displayName: 'Twine Authenticate'
+        inputs:
+          pythonUploadServiceConnection: restio
 
-    # the sed command below fixes the wrong username=build introduced
-    # by the TwineAuthenticate command above
-    - script: |
-        sed -i 's/username=build/username=__token__/g' $(PYPIRC_PATH)
-        python -m twine upload -r restio --config-file $(PYPIRC_PATH) PythonWheel/*
-      displayName: "Publish to PyPI"
+      # the sed command below fixes the wrong username=build introduced
+      # by the TwineAuthenticate command above
+      - script: |
+          sed -i 's/username=build/username=__token__/g' $(PYPIRC_PATH)
+          twine upload -r restio --config-file $(PYPIRC_PATH) PythonWheel/*
+        displayName: "Publish to PyPI"
+
+      - task: GitHubRelease@1
+        displayName: Publish release version on GitHub
+        inputs:
+          gitHubConnection: eduardostarling
+          repositoryName: eduardostarling/restio
+          tagSource: userSpecifiedTag
+          tagPattern: '[0-9]+.[0-9]+.[0-9]+\S*'
+          tag: $(tagVersion)
+          isPreRelease: $(isPreRelease)

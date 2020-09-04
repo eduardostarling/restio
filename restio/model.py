@@ -1,17 +1,12 @@
 from __future__ import annotations
 
-import types
 from collections.abc import Iterable
-from dataclasses import dataclass
-from functools import wraps
-from typing import (Any, Dict, Generic, List, Optional, Set, Tuple, Type,
-                    TypeVar, Union)
+from typing import Any, Callable, Dict, List, Optional, Type
 from uuid import UUID, uuid4
 
-from .event import EventListener
-from .state import ModelState
-
-T = TypeVar('T', int, str, None)
+from restio.event import EventListener
+from restio.fields.base import Field, T_co
+from restio.state import ModelState
 
 
 def _check_model_type(obj: Optional[BaseModel]):
@@ -19,250 +14,185 @@ def _check_model_type(obj: Optional[BaseModel]):
         raise TypeError("The provided object is not of type BaseModel.")
 
 
-class PrimaryKey(Generic[T]):
-    """
-    Represents a primary key in a remote model, in a similar fashion as if
-    it would be stored in a relational database. The PrimaryKey fields are
-    arbitrary to the developer's choice and used to identify models on the
-    internal cache, used as reference for retrieval from the remote server
-    and represent model uniqueness within a Transaction scope.
+class ModelMeta:
+    fields: Dict[str, Field]
+    primary_keys: Dict[str, Field]
 
-    Each PrimaryKey is a generic type and should explicitly indicate the type
-    during declaration in a BaseModel.
-    """
-    name: str
-    _type: Type[T]
-
-    def __init__(self, key_type: Type[T], **kwargs) -> None:
-        if key_type not in T.__constraints__:  # type: ignore
-            raise TypeError(f"Provided type {key_type.__name__} is not allowed.")
-
-        self._type = key_type
-
-    def __set_name__(self, owner, name: str):
-        self.name = name
-
-    def __set__(self, instance, value: T):
-        """
-        Sets the value of the PrimaryKey.
-
-        :param value: The value contained by the PrimaryKey.
-        :raises RuntimeError: If `value` is not of the type T specified during
-                              the declaration of the instance.
-        """
-        if isinstance(value, PrimaryKey):
-            value = None
-
-        if value and not isinstance(value, self._type):
-            raise RuntimeError(f"Primary key value must be of type {self._type.__name__}")
-
-        instance.__dict__[self.name] = value
-
-    def __get__(self, instance, owner) -> Union[T, PrimaryKey[T]]:
-        """
-        Returns the value stored by the PrimaryKey.
-
-        :return: The value stored by the instance.
-        """
-
-        if instance is None:
-            return self
-
-        return instance.__dict__.setdefault(self.name, None)
-
-
-ValueKey = Union[T, PrimaryKey[T]]
-"""
-Represents the Union of a PrimaryKey or the value stored by it.
-"""
-
-
-def mdataclass(*args, **kwargs):
-    """
-    Wrapper around the dataclass() decorator used to guarantee that subclasses of
-    BaseModel are dataclasses constructed with the proper configuration. Only needed
-    if any of the child classes are intended to be dataclasses.
-    """
-    kwargs['eq'] = kwargs.get('eq', False)
-
-    def init_wrapper(init_method):
-        @wraps(init_method)
-        def init_func(self: BaseModel, *margs, **mkwargs):
-            self.pre_setup_model()
-            init_method(self, *margs, **mkwargs)
-            self.post_setup_model()
-        return init_func
-
-    model_class = dataclass(*args, **kwargs)
-    model_class.__init__ = init_wrapper(model_class.__init__)
-
-    return model_class
-
-
-STATIC_MUTABLE_ATTR = "__mutable__"
-STATIC_IMMUTABLE_ATTR = "__immutable__"
+    def __init__(self):
+        self.fields = dict()
+        self.primary_keys = dict()
 
 
 class BaseModelMeta(type):
     """
-    BaseModel metaclass. Responsible to internally cache the data schema in a
-    BaseModel subclass by identifying fields that are primary keys, mutable and
-    immutable.
+    BaseModel metaclass. Responsible to internally cache the data schema in a BaseModel
+    subclass by identifying fields and primary keys.
     """
 
-    def __new__(cls, name, bases, dct):
-        x: BaseModel = super().__new__(cls, name, bases, dct)
+    def __new__(cls, name: str, bases: Iterable[Type[BaseModel]], dct: Dict[str, Any]):
+        meta: ModelMeta = ModelMeta()
+        dct["_meta"] = meta
 
-        static_mutable = dct.get(STATIC_MUTABLE_ATTR, tuple())
-        static_immutable = dct.get(STATIC_IMMUTABLE_ATTR, tuple())
+        # other internal fields not initialized in BaseModel
+        dct["_internal_id"] = None
+        dct["_listener"] = None
+        dct["_persistent_values"] = None
 
-        # set defaults
-        x._class_primary_keys = {}
-        x._class_mutable = set(static_mutable)
-        x._class_immutable = set(static_immutable)
+        model_class: BaseModel = super().__new__(cls, name, bases, dct)  # type: ignore
 
-        # inherit from base classes
+        base: Type[BaseModel]
         for base in bases:
             try:
-                x._class_primary_keys.update(base._class_primary_keys)
-                x._class_mutable.update(base._class_mutable)
-                x._class_immutable.update(base._class_immutable)
+                meta.fields.update(base._meta.fields)
+                meta.primary_keys.update(base._meta.primary_keys)
             except Exception:
                 pass
 
-        # process class fields and properties when __mutable__ or __immutable__
-        # are not provided explicitly
+        # process class fields
         for field_name, field_value in dct.items():
-            # ignore mutable/immutable static fields or private fields
-            if field_name in (STATIC_MUTABLE_ATTR, STATIC_IMMUTABLE_ATTR) or field_name.startswith('__'):
+            if not isinstance(field_value, Field):
                 continue
 
-            # ignore all functions
-            if isinstance(field_value, types.FunctionType):
-                continue
+            model_class._meta.fields[field_name] = field_value
+            if field_value.pk:
+                model_class._meta.primary_keys[field_name] = field_value
 
-            # ignore all fields starting with _
-            if not static_immutable and field_name.startswith('_'):
-                x._class_immutable.add(field_name)
-            elif not static_mutable:
-                x._class_mutable.add(field_name)
+        return model_class
 
-        # ignore all immutable fields
-        x._class_mutable.difference_update(x._class_immutable)
+    def __call__(self, *args, **kwargs):
+        instance: BaseModel = super().__call__(*args, **kwargs)
 
-        for field_name, field_value in dct.items():
-            if field_name in x._class_mutable and isinstance(field_value, PrimaryKey):
-                x._class_primary_keys.update({field_name: field_value._type})
+        # stores the default after the constructor, if nothing has been set yet
+        for field in instance._meta.fields.values():
+            field._store_default(instance, force=False)
 
-        return x
+        instance._internal_id = uuid4()
+        instance._persistent_values = {}
+        instance._listener = EventListener()
+        instance._initialized = True
+
+        return instance
 
 
+MODEL_PRE_UPDATE_EVENT = "__pre_update__"
 MODEL_UPDATE_EVENT = "__updated__"
 
 
-class BaseModel(Generic[T], metaclass=BaseModelMeta):
-    f"""
-    A representation of a remote object model into a restio.Transaction object.
+class BaseModel(metaclass=BaseModelMeta):
+    """
+    A representation of a remote object model in a Transaction object.
 
     BaseModel is an abstract class that should be extended to represent models incoming
-    from or outgoing to a remote REST API. The subclasses can benefit from dataclasses
-    by using the decorator @mdataclass.
+    from or outgoing to a remote REST API.
 
     Models can exist independently from Transactions but contain an internal state that
-    indicates the status of the model within the current context. The transactions are
-    responsible to control this state. Also, each model contains a set of control attributes
-    that indicate which fields are mutable, immutable or primary keys (provided by the
-    BaseModelMeta). By default, all static attributes (including properties) in the model
-    will become mutable attributes, except for those which names start with '_' . The
-    extended classes can control this behavior by providing the static fields
-    {STATIC_MUTABLE_ATTR} and {STATIC_IMMUTABLE_ATTR} (in which case, the default behavior
-    will be ignored for that class).
+    indicates the status of the model within the current context. The Transactions are
+    responsible to control this state. Also, each model contains a set of control
+    attributes that indicate which fields are watched by restio internals. By default,
+    all Field descriptors in the model will become field attributes. Fields declared
+    with pk=True will be used by restio to optimize the caching of the models in a
+    Transaction.
 
     Models that change over time will contain an internal dictionary with the latest
     know persistent value of each field. This is done to guarantee fast rollback of the
-    values when the Transaction is invalid, and to also indicate which values might have
-    changed within the transaction scope. If a mutable field is modified directly, the model
-    will intercept the change and save the older value into the persistent dictionary until
-    `_persist` is called. During a `_rollback` call, however, the stored values are re-assigned
-    to their original attributes. Each attribute change will also dispatch an update event so
-    that the transaction is aware of changes and manages the model's internal state accordingly.
-    The persistent dictionary can also be potentially used by DAO's to verify which values where
-    updated prior to sending a request through the REST API, thus allowing for proper optimization
-    and minimizing chances of conflicting changes on the remote object.
+    values when the Transaction is invalid, and to also indicate which values might
+    have changed within the transaction scope. If a field is modified directly, the
+    model will intercept the change and save the older value into the persistent
+    dictionary until `_persist` is called. During a `_rollback` call, however, the
+    stored values are re-assigned to their original attributes. Each attribute change
+    will also dispatch an update event so that the transaction is aware of changes and
+    manages the model's internal state accordingly. The persistent dictionary (through
+    the helper method `is_field_modified`) can also be used by DAO's to verify which
+    values where updated prior to sending a request through the REST API, thus allowing
+    for proper optimization and minimizing chances of conflicting changes on the remote
+    object.
 
-    All models automatically generate a random internal UUID when created. This UUID is used
-    internally for comparison purposes, and externally as an identity.
-
-    :Example:
-
-    @mdataclass
-    class Person(BaseModel):
-        id: PrimaryKey[int] = PrimaryKey(int)
-        name: str = ""
-        age: int = 0
-
-    m = Person(id=1, name="Bob", age=10)
-    print(m)  # Person(id=1, name="Bob", age=10)
-
+    All models automatically generate a random internal UUID when created. This UUID is
+    used internally for comparison purposes, and externally as an identity. Although
+    this attribute is not explicitly set as private, it should never be modified.
     """
-    _class_primary_keys: Dict[str, type]
-    _class_mutable: Set[str]
-    _class_immutable: Set[str]
+
+    # these are all initialized by the metaclass
+    _meta: ModelMeta
+
+    __state: ModelState = ModelState.UNBOUND
+    __primary_keys: Optional[Dict[str, T_co]] = None
+    _initialized: bool = False
 
     _internal_id: UUID
-    _state: ModelState
     _persistent_values: Dict[str, Any]
-    _primary_keys: Tuple[Optional[T], ...]
     _listener: EventListener
-    _initialized: bool
 
-    def __init__(self):
-        self.pre_setup_model()
-        self.post_setup_model()
-
-    def pre_setup_model(self):
-        self._initialized = False
-        self._internal_id = uuid4()
-        self._persistent_values = {}
-        self._listener = EventListener()
-
-    def post_setup_model(self):
-        self._state = ModelState.CLEAN
-        self._primary_keys = self._get_primary_keys()
-        self._initialized = True
-
-    def _get_primary_keys(self) -> Tuple[Optional[T], ...]:
-        return tuple([
-            getattr(self, key)
-            for key in self._class_primary_keys])
-
-    def get_keys(self) -> Tuple[Optional[T], ...]:
+    @property
+    def _state(self) -> ModelState:
         """
-        Returns the internal tuple with the primary keys if the class.
+        Returns the state of the current model.
 
-        :return: The tuple with primary keys.
+        :return: The ModelState representation.
         """
-        return self._primary_keys
+        return self.__state
 
-    def _get_mutable_fields(self) -> Dict[str, Any]:
-        return {k: getattr(self, k) for k in self._class_mutable}
+    @_state.setter
+    def _state(self, state: ModelState):
+        self.__state = state
+
+    @property
+    def primary_keys(self) -> Dict[str, T_co]:
+        """
+        Returns a dictionary containing all primary keys. The keys will be
+        ordered in the same order as they are declared in the model type,
+        also following the order in which they appear in class inheritance.
+
+        This property is optimized to minimize the number of iterations done
+        in the model instance by internalizing a cache with the latest retrieved
+        primary keys. This cache is reset for every modification of a primary
+        key and recovered during the next call to the property.
+
+        :return: The ordered tuple of values.
+        """
+        if self.__primary_keys is None:
+            self.__primary_keys = self._load_primary_keys()
+
+        return self.__primary_keys
+
+    def _load_primary_keys(self) -> Dict[str, T_co]:
+        """
+        Returns a dictionary containing the primary key fields (keys) and their
+        current values in the model (values). This operation will inspect the
+        instance and collect all current values on-spot.
+
+        :return: Dictionary of primary keys values.
+        """
+        return {key: getattr(self, key) for key in self._meta.primary_keys}
+
+    def _reset_primary_keys(self):
+        """
+        Resets the internal cache of primary keys for the instance.
+        """
+        self.__primary_keys = None
 
     def get_children(
-        self, recursive: bool = False, children: List[BaseModel] = None, top_level: Optional[BaseModel] = None
+        self,
+        recursive: bool = False,
+        children: Optional[List[BaseModel]] = None,
+        top_level: Optional[BaseModel] = None,
     ) -> List[BaseModel]:
         """
         Returns the list of all children of the current model. This algorithm checks in
-        runtime for all objects refered by the instance, whether directly, through a list
-        or a set. When `recursive` is True, then the algorithm will recursively search through
-        all children. `children` and `top_level` are control variables that indicate which
-        models have already been inspected by this function, in order to avoid infinite
-        recursion if any circular dependency exists.
+        runtime for all objects refered by the instance and that are part of fields
+        marked with depends_on=True. When `recursive` is True, then the algorithm will
+        recursively search through all children.
+
+        `children` and `top_level` are control variables that indicate which models
+        have already been inspected by this function, in order to avoid infinite
+        recursion if any circular dependency exists. In most cases, they should be left
+        empty.
 
         :param recursive: If True, recursively searches for children. Returns only
                           first degree relationships otherwise. Defaults to False.
         :param children: List of existing models already inspected.
         :param top_level: The top-level model from where inspection started.
-        :return: The list of all children.
+        :return: The list of children.
         """
 
         if children is None:
@@ -277,10 +207,14 @@ class BaseModel(Generic[T], metaclass=BaseModelMeta):
         else:
             top_level = self
 
-        for value in self._get_mutable_fields().values():
+        for value in self.dependency_fields.values():
 
-            def check(child):
-                if isinstance(child, BaseModel) and child not in children:
+            def check(child: Optional[BaseModel]):
+                # this can happen when the field allows none
+                if not child:
+                    return
+
+                if child not in children:  # type: ignore
                     if recursive:
                         child.get_children(recursive, children, top_level)
                     else:
@@ -289,15 +223,53 @@ class BaseModel(Generic[T], metaclass=BaseModelMeta):
             # iterables are only supported if the values
             # are not iterables - there is no recursiveness
             if isinstance(value, Iterable):
-                if isinstance(value, dict):
-                    value = value.values()
-
+                value: Iterable[Any]
                 for item in value:
                     check(item)
             else:
                 check(value)
 
         return children
+
+    @property
+    def fields(self) -> Dict[str, Any]:
+        """
+        Returns the values of each field in the model instance.
+
+        :return: A dict with keys containing the string names of the fields,
+                 and values containing the value of the corresponding field.
+        """
+        return {k: getattr(self, k) for k in self._filter_fields(lambda v: True)}
+
+    @property
+    def dependency_fields(self) -> Dict[str, Any]:
+        """
+        Returns the values of each field that have relationship with other models.
+
+        :return: The dictionary of fields and their values
+        """
+        return {
+            k: getattr(self, k) for k in self._filter_fields(lambda v: v.depends_on)
+        }
+
+    def is_field_modified(self, field_name: str) -> bool:
+        """
+        Indicates of field with name `field_name` has been modified.
+
+        :param field_name: The name of the field.
+        :raises ValueError: When the field name does not exist.
+        :return: True if field is modified, False otherwise.
+        """
+        if field_name not in self._meta.fields:
+            raise ValueError(
+                f"Field `{field_name}` does not exist in model"
+                " `{self.__class__.__name__}`."
+            )
+
+        return field_name in self._persistent_values
+
+    def _filter_fields(self, filt: Callable[[Field], bool]):
+        return {k: v for k, v in self._meta.fields.items() if filt(v)}
 
     def _rollback(self):
         """
@@ -306,32 +278,36 @@ class BaseModel(Generic[T], metaclass=BaseModelMeta):
         for attr, value in list(self._persistent_values.items()):
             setattr(self, attr, value)
 
-        self._persistent_values = {}
+        self._persist()
 
     def _persist(self):
         """
         Persists the current attribute values by emptying the internal persistent
-        dictionary. Once this is called, it is not possible to rollback to the
-        old values anymore. It is recommended that this method should only be called
-        by the party that persisted the values on the remote server.
+        dictionary. Once this is called, it is not possible to rollback to the old
+        values anymore. It is recommended that this method should only be called by the
+        party that persisted the values on the remote server.
         """
         self._persistent_values = {}
 
-    def _update(self, name, value):
-        if not self._initialized:
-            return
+    def _pre_update(self, field: Field[T_co], value: T_co):
+        self._listener.dispatch(MODEL_PRE_UPDATE_EVENT, self, field, value)
 
+    def _update(self, field: Field[T_co], value: T_co):
+        if field.pk:
+            self._reset_primary_keys()
+
+        name: str = field.name
         if name in self._persistent_values:
             if value == self._persistent_values[name]:
                 del self._persistent_values[name]
         else:
-            mutable_fields = self._get_mutable_fields()
+            mutable_fields = self.fields
             if value != mutable_fields[name]:
                 self._persistent_values[name] = mutable_fields[name]
 
         self._listener.dispatch(MODEL_UPDATE_EVENT, self)
 
-    def __eq__(self, other):
+    def __eq__(self, other: BaseModel) -> bool:
         if other and isinstance(other, type(self)):
             return self._internal_id == other._internal_id
 
@@ -339,16 +315,3 @@ class BaseModel(Generic[T], metaclass=BaseModelMeta):
 
     def __hash__(self):
         return hash(str(self._internal_id))
-
-    # TODO: internal mutable fields (lists and sets) are not affected
-    # by this interception, therefore the call to self._update will
-    # not happen - we should figure out a way to trigger self._update
-    # in those cases
-    def __setattr__(self, name, value):
-        if name in self._class_mutable:
-            self._update(name, value)
-
-        super().__setattr__(name, value)
-
-        if name in self._class_primary_keys:
-            self._primary_keys = self._get_primary_keys()

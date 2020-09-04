@@ -1,4 +1,0 @@
-Transaction State Management
-============================
-
-TODO

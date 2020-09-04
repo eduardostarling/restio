@@ -19,7 +19,6 @@ class DummyObject:
 
 
 class TestEventListener:
-
     @pytest.fixture
     def listener(self) -> EventListener:
         return EventListener()
@@ -41,6 +40,7 @@ class TestEventListener:
         def func():
             obj.calls += 1
             return value
+
         return func
 
     def test_subscribe_method(self, listener, event, value, obj):

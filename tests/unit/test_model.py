@@ -1,289 +1,303 @@
-from typing import List, Optional
+from __future__ import annotations
+
+from uuid import UUID
 
 import pytest
 
-from restio.model import BaseModel, PrimaryKey, mdataclass
+from restio.event import EventListener
+from restio.fields import (
+    BoolField,
+    FrozenSetField,
+    FrozenSetModelField,
+    IntField,
+    ModelField,
+    StrField,
+    TupleField,
+    TupleModelField,
+)
+from restio.model import MODEL_UPDATE_EVENT, BaseModel
 
 
-@mdataclass
 class ModelSinglePKInt(BaseModel):
-    id: PrimaryKey[int] = PrimaryKey(int)
+    id: IntField = IntField(pk=True)
 
 
-@mdataclass
 class ModelSinglePKStr(BaseModel):
-    id: PrimaryKey[str] = PrimaryKey(str)
+    id: StrField = StrField(pk=True)
 
 
-@mdataclass
 class ModelDoublePKIntStr(BaseModel):
-    id: PrimaryKey[int] = PrimaryKey(int)
-    key: PrimaryKey[str] = PrimaryKey(str)
+    id: IntField = IntField(pk=True)
+    key: StrField = StrField(pk=True)
 
 
-@mdataclass
 class ModelDoublePKStrInt(BaseModel):
-    key: PrimaryKey[str] = PrimaryKey(str)
-    id: PrimaryKey[int] = PrimaryKey(int)
+    key: StrField = StrField(pk=True)
+    id: IntField = IntField(pk=True)
 
 
-@mdataclass
-class ModelA(BaseModel):
-    id: PrimaryKey[int] = PrimaryKey(int)
-    a: int = 0
-    b: str = ''
-
-
-@mdataclass
-class ModelB(BaseModel):
-    ref: Optional[ModelA] = None
-    c: int = 0
-
-
-@mdataclass
-class ModelC(BaseModel):
-    ref: Optional[List[ModelB]] = None
-    d: str = ''
-
-
-@mdataclass
-class ModelD(BaseModel):
-    ref: Optional['ModelE'] = None  # noqa: F821
-
-
-@mdataclass
-class ModelE(BaseModel):
-    ref: Optional[ModelD] = None
-
-
-class TestModel:
-
-    @pytest.fixture
-    def a(self):
-        return ModelA(a=1, b='a')
-
-    @pytest.fixture
-    def b(self):
-        return ModelB(c='b')
-
-    @pytest.fixture
-    def c(self):
-        return ModelC()
-
-    @pytest.fixture
-    def single_int(self):
-        return ModelSinglePKInt()
-
-    @pytest.fixture
-    def single_str(self):
-        return ModelSinglePKStr()
-
-    @pytest.fixture
-    def double_is(self):
-        return ModelDoublePKIntStr()
-
-    @pytest.fixture
-    def double_si(self):
-        return ModelDoublePKStrInt()
-
-    def test_primary_key_int(self, single_int):
+class TestModelPrimaryKeys:
+    def test_primary_key_int(self):
+        single_int = ModelSinglePKInt()
         single_int.id = 1
 
         assert single_int.id == 1
-        assert single_int.get_keys() == (1,)
+        assert single_int.primary_keys == dict(id=1)
 
-    def test_primary_key_str(self, single_str):
+    def test_primary_key_str(self):
+        single_str = ModelSinglePKStr()
         single_str.id = "1"
 
         assert single_str.id == "1"
-        assert single_str.get_keys() == ("1",)
+        assert single_str.primary_keys == dict(id="1")
 
-    def test_primary_key_double_int_str(self, double_is):
+    def test_primary_key_double_int_str(self):
+        double_is = ModelDoublePKIntStr()
         double_is.id, double_is.key = 1, "2"
 
         assert double_is.id == 1
         assert double_is.key == "2"
-        assert double_is.get_keys() == (1, "2")
+        assert double_is.primary_keys == dict(id=1, key="2")
 
-    def test_primary_key_double_str_int(self, double_si):
+    def test_primary_key_double_str_int(self):
+        double_si = ModelDoublePKStrInt()
         double_si.key, double_si.id = "1", 2
 
         assert double_si.key == "1"
         assert double_si.id == 2
-        assert double_si.get_keys() == ("1", 2)
+        assert double_si.primary_keys == dict(key="1", id=2)
 
-    def test_primary_key_type_error(self):
-        PrimaryKey(int)
-        PrimaryKey(str)
-
-        with pytest.raises(TypeError):
-            PrimaryKey(object)
-
-    def test_primary_key_set_error(self, single_int, b):
-        with pytest.raises(RuntimeError, match="value must be of type"):
+    def test_primary_key_set_error(self):
+        single_int = ModelSinglePKInt()
+        with pytest.raises(TypeError, match="should be of type"):
             single_int.id = "1"
 
         single_int.id = 2
         assert single_int.id == 2
-        assert single_int.get_keys() == (2,)
+        assert single_int.primary_keys == dict(id=2)
 
         single_int.id = 3
         assert single_int.id == 3
-        assert single_int.get_keys() == (3,)
+        assert single_int.primary_keys == dict(id=3)
 
-    def test_get_mutable_dataclass_default(self, a, b):
-        assert set(a._class_mutable) == set(['id', 'a', 'b'])
-        assert set(b._class_mutable) == set(['ref', 'c'])
-        assert set(a._get_mutable_fields().values()) == set([None, 1, 'a'])
-        assert set(b._get_mutable_fields().values()) == set([None, 'b'])
 
-    def test_get_mutable_dataclass_non_default(self):
-        @mdataclass
-        class ModelDataclass(BaseModel):
-            __mutable__ = ('a', 'b')
-            __immutable__ = ('_immutable',)
+class ModelA(BaseModel):
+    id: IntField = IntField(pk=True)
+    a: IntField = IntField()
+    b: StrField = StrField()
+    c: TupleField = TupleField(str)
+    d: FrozenSetField = FrozenSetField(int)
+    e: BoolField = BoolField()
 
-            a: int
-            b: str
-            _immutable: float
 
-        assert ModelDataclass._class_mutable == set(['a', 'b'])
-        assert ModelDataclass._class_immutable == set(['_immutable'])
+class ModelB(BaseModel):
+    ref: ModelField[ModelA] = ModelField(ModelA)
+    c: StrField = StrField()
 
-    def test_get_mutable_dataclass_half_default_inheritance(self):
-        @mdataclass
-        class BaseModelDataClass(BaseModel):
-            __mutable__ = ('a',)
-            __immutable__ = ('_immutable_a',)
 
-            a: int
-            _immutable_a: int
+class ModelC(BaseModel):
+    ref_tuple: TupleModelField[ModelB] = TupleModelField(ModelB)
+    ref_frozenset: FrozenSetModelField[ModelB] = FrozenSetModelField(ModelB)
+    d: StrField = StrField()
 
-        @mdataclass
-        class ModelDataclass(BaseModelDataClass):
-            b: str = ""
-            _immutable_b: str = ""
 
-        assert BaseModelDataClass._class_mutable == set(['a'])
-        assert BaseModelDataClass._class_immutable == set(['_immutable_a'])
-        assert ModelDataclass._class_mutable == set(['a', 'b'])
-        assert ModelDataclass._class_immutable == set(['_immutable_a', '_immutable_b'])
+class TestModel:
+    def test_model_internal_uuid(self):
+        class Model(BaseModel):
+            pass
 
-    def test_get_mutable_non_dataclass_non_default(self):
-        class ModelNonDataclass(BaseModel):
-            __mutable__ = ('a', 'b')
-            __immutable__ = ('_immutable',)
+        model_a = Model()
+        model_b = Model()
 
-            a: int
-            b: str
-            _immutable: float
+        assert model_a._internal_id
+        assert model_b._internal_id
+        assert isinstance(model_a._internal_id, UUID)
+        assert isinstance(model_b._internal_id, UUID)
+        assert model_a._internal_id != model_b._internal_id
 
-        assert ModelNonDataclass._class_mutable == set(['a', 'b'])
-        assert ModelNonDataclass._class_immutable == set(['_immutable'])
+    def test_model_persistent_values(self):
+        class Model(BaseModel):
+            pass
 
-    def test_get_mutable_non_dataclass_default(self):
-        class ModelNonDataclass(BaseModel):
-            a: int = 0
-            b: str = ""
-            _immutable: float = 0.0
+        model_a = Model()
+        model_b = Model()
 
-        assert ModelNonDataclass._class_mutable == set(['a', 'b'])
-        assert ModelNonDataclass._class_immutable == set(['_immutable'])
+        assert model_a._persistent_values == {}
+        assert model_b._persistent_values == {}
+        assert id(model_a._persistent_values) != id(model_b._persistent_values)
 
-    def test_get_mutable_non_dataclass_half_default(self):
-        class ModelNonDataclass(BaseModel):
-            __mutable__ = ('a', 'b')
+    def test_model_initialized(self):
+        class Model(BaseModel):
+            def __init__(self):
+                assert not self._initialized
 
-            a: int
-            b: str = ""
-            _immutable: float = 0.0
+        model = Model()
 
-        assert ModelNonDataclass._class_mutable == set(['a', 'b'])
-        assert ModelNonDataclass._class_immutable == set(['_immutable'])
+        assert model._initialized
 
-    def test_get_mutable_non_dataclass_half_default_inheritance(self):
-        class BaseModelNonDataclass(BaseModel):
-            a: int = 0
+    def test_model_event_listener(self):
+        class Model(BaseModel):
+            def __init__(self):
+                assert not self._listener
 
-        class ModelNonDataclass(BaseModelNonDataclass):
-            __mutable__ = ('b')
+        model = Model()
 
-            b: str
-            _immutable: float = 0.0
+        assert model._listener
+        assert isinstance(model._listener, EventListener)
 
-        assert BaseModelNonDataclass._class_mutable == set(['a'])
-        assert not BaseModelNonDataclass._class_immutable
-        assert ModelNonDataclass._class_mutable == set(['a', 'b'])
-        assert ModelNonDataclass._class_immutable == set(['_immutable'])
+    def test_model_equality(self):
+        class Model(BaseModel):
+            pass
 
-    def test_modify_mutable(self, a):
+        model_a, model_b = Model(), Model()
+
+        assert model_a != model_b
+
+        model_b._internal_id = model_a._internal_id
+
+        assert model_a == model_b
+
+    @pytest.mark.parametrize(
+        "model, expected_fields, expected_dependency_fields",
+        [
+            (
+                ModelA(),
+                {"id": 0, "a": 0, "b": "", "c": tuple(), "d": frozenset(), "e": False},
+                {},
+            ),
+            (ModelB(), {"ref": None, "c": ""}, {"ref": None}),
+            (
+                ModelC(),
+                {"ref_tuple": tuple(), "ref_frozenset": frozenset(), "d": ""},
+                {"ref_tuple": tuple(), "ref_frozenset": frozenset()},
+            ),
+        ],
+    )
+    def test_model_fields(self, model, expected_fields, expected_dependency_fields):
+        assert model._meta.fields.keys() == expected_fields.keys()
+        assert model.fields == expected_fields
+        assert model.dependency_fields == expected_dependency_fields
+
+    def test_model_fields_inheritance(self):
+        class Model(BaseModel):
+            a: IntField = IntField(default=1)
+            non_field_a: int = 0
+
+        class ChildModel(Model):
+            b: StrField = StrField()
+            non_field_b: str = ""
+
+        model = Model()
+        child_model = ChildModel()
+
+        assert Model._meta.fields.keys() == {"a"}
+        assert ChildModel._meta.fields.keys() == {"a", "b"}
+
+        assert model.fields == {"a": 1}
+        assert child_model.fields == {"a": 1, "b": ""}
+
+    def test_model_update(self):
+        model = ModelA()
+        old_value = model.a
+        field = model._meta.fields["a"]
+
+        assert model._persistent_values == {}
+
+        model._update(field, 55)
+        assert model.is_field_modified("a")
+        assert model._persistent_values == {"a": old_value}
+
+        model._update(field, 66)
+        assert model.is_field_modified("a")
+        assert model._persistent_values == {"a": old_value}
+
+        model._update(field, old_value)
+        assert not model.is_field_modified("a")
+        assert model._persistent_values == {}
+
+    def test_change_field_value(self):
+        a = ModelA()
+
         old_value_a, old_value_b = a.a, a.b
-        new_value_a = "new value a"
+        new_value_a = 11
         new_value_b = "new value b"
-        assert not a._persistent_values
+
         a.a = new_value_a
+        assert a.a == new_value_a
+        assert a.b == old_value_b
+        assert a._persistent_values == {"a": old_value_a}
+
         a.b = new_value_b
         assert a.a == new_value_a
-        assert a._persistent_values['a'] == old_value_a
         assert a.b == new_value_b
-        assert a._persistent_values['b'] == old_value_b
+        assert a._persistent_values == {"a": old_value_a, "b": old_value_b}
+
         a.a = old_value_a
-        assert 'a' not in a._persistent_values
         assert a.a == old_value_a
         assert a.b == new_value_b
-        assert a._persistent_values['b'] == old_value_b
+        assert a._persistent_values == {"b": old_value_b}
+
         a.b = old_value_b
+        assert a.a == old_value_a
         assert a.b == old_value_b
-        assert 'b' not in a._persistent_values
+        assert not a._persistent_values
 
-    @pytest.mark.parametrize("iterable", [list, set, frozenset, tuple])
-    def test_get_children_with_iterable(self, iterable):
-        a = ModelA()
-        b = ModelB()
-        c = ModelC()
+    def test_change_field_value_two_instances(self):
+        model_a, model_b = ModelA(), ModelA()
 
-        c.ref, b.ref = iterable([b]), a
+        old_model_a_value = model_a.a
+        old_model_b_value = model_b.a
+
+        model_a.a = 55
+        assert model_a._persistent_values == {"a": old_model_a_value}
+        assert model_b._persistent_values == {}
+
+        model_a.a = old_model_a_value
+        model_b.a = 55
+        assert model_a._persistent_values == {}
+        assert model_b._persistent_values == {"a": old_model_b_value}
+
+    def test_model_update_dispatch(self):
+        called = False
+        called_instance = None
+
+        model = ModelA()
+
+        def listen(instance):
+            nonlocal called, called_instance
+            called = True
+            called_instance = instance
+
+        model._listener.subscribe(MODEL_UPDATE_EVENT, listen)
+
+        model.a = 2
+
+        assert called
+        assert id(called_instance) == id(model)
+
+    def test_get_children(self):
+        a, b1, b2, c = ModelA(), ModelB(), ModelB(), ModelC()
+
+        c.ref_tuple, c.ref_frozenset, b1.ref, b2.ref = (b1,), frozenset({b2}), a, None
 
         all_children = c.get_children(True)
         assert a in all_children
-        assert b in all_children
+        assert b1 in all_children
+        assert b2 in all_children
 
-        one_child = c.get_children(False)
-        assert b in one_child
-        assert a not in one_child
-
-    def test_get_children_with_dict(self):
-        a = ModelA()
-        b = ModelB()
-        c = ModelC()
-
-        c.ref, b.ref = {"v": b}, a
-
-        all_children = c.get_children(True)
-        assert a in all_children
-        assert b in all_children
-
-        one_child = c.get_children(False)
-        assert b in one_child
-        assert a not in one_child
+        two_children = c.get_children(False)
+        assert b1 in two_children
+        assert b2 in two_children
+        assert a not in two_children
 
     def test_get_children_circular(self):
-        b = ModelB()
-        c = ModelC()
+        class ModelBCircular(ModelB):
+            ref: ModelField[ModelC] = ModelField(ModelC)
 
-        c.ref, b.ref = set([b]), c
+        b, c = ModelBCircular(), ModelC()
+
+        c.ref_frozenset, b.ref = frozenset({b}), c
         one_child = c.get_children(True)
 
         assert b in one_child
         assert c not in one_child
-
-    def test_equal(self):
-        a1, a2 = ModelA(), ModelA()
-        a3 = ModelA()
-        a3._internal_id = a1._internal_id
-
-        assert a1 != a2
-        assert a1 == a3
-
-        a3.id = 1
-        assert a1 == a3

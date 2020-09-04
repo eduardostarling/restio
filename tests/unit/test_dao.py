@@ -21,27 +21,23 @@ class DAOMissingAddRemoveUpdateMock(BaseDAO):
 
 
 class DAOMock(BaseDAO):
-    async def get(self, keys) -> None:
+    async def get(self, **keys) -> None:
         pass
 
-    async def add(self, obj: BaseModel) -> BaseModel:
+    async def add(self, obj: BaseModel):
         await asyncio.sleep(0.1)
-        return obj
 
-    async def update(self, obj: BaseModel) -> BaseModel:
+    async def update(self, obj: BaseModel):
         await asyncio.sleep(0.2)
-        return obj
 
-    async def remove(self, obj: BaseModel) -> BaseModel:
+    async def remove(self, obj: BaseModel):
         await asyncio.sleep(0.3)
-        return obj
 
-    async def error(self, obj: BaseModel) -> BaseModel:
+    async def error(self, obj: BaseModel):
         raise RuntimeError("error")
 
 
 class TestDAO:
-
     @pytest.fixture
     def empty_dao(self):
         return DAOEmptyMock(ModelMock)
@@ -65,10 +61,17 @@ class TestDAO:
                 check_dao_implemented_method(func)
 
     def test_check_missing_methods(self, missing_funcs_dao):
-        funcs = [missing_funcs_dao.add, missing_funcs_dao.remove, missing_funcs_dao.update]
+        funcs = [
+            missing_funcs_dao.add,
+            missing_funcs_dao.remove,
+            missing_funcs_dao.update,
+        ]
 
         for func in funcs:
-            with pytest.raises(NotImplementedError, match="DAOMissingAddRemoveUpdateMock not implemented"):
+            with pytest.raises(
+                NotImplementedError,
+                match="DAOMissingAddRemoveUpdateMock not implemented",
+            ):
                 check_dao_implemented_method(func)
 
         check_dao_implemented_method(missing_funcs_dao.get)
@@ -112,9 +115,8 @@ class TestDAOTask:
 
     @pytest.mark.asyncio
     async def test_await(self, task_add: DAOTask, model: BaseModel):
-        assert await task_add.run_task() == model
-        assert await task_add.task == model
-        assert await task_add == model
+        await task_add.run_task()
+        await task_add.task
 
     @pytest.mark.asyncio
     async def test_await_error(self, task_error: DAOTask):
@@ -153,7 +155,9 @@ class TestDAOTask:
         assert task_add.model == model
 
     @pytest.mark.asyncio
-    async def test_order(self, task_add: DAOTask, task_update: DAOTask, task_remove: DAOTask):
+    async def test_order(
+        self, task_add: DAOTask, task_update: DAOTask, task_remove: DAOTask
+    ):
         tasks = [task_remove, task_update, task_add]
         await asyncio.wait(tasks)
 

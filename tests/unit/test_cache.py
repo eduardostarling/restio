@@ -1,28 +1,31 @@
-from typing import List
+from typing import List, Tuple
 
 import pytest
 
 from restio.cache import ModelCache, QueryCache
-from restio.model import BaseModel, PrimaryKey, mdataclass
+from restio.fields import IntField
+from restio.model import BaseModel
 from restio.query import query
 
 
-@mdataclass
 class Model(BaseModel):
-    id: PrimaryKey[int] = PrimaryKey(int)
+    id: IntField = IntField(pk=True, default=1)
+
+    def __init__(self, id_=None):
+        self.id = id_ or self.id
 
 
 @query
-async def SimpleQuery(self) -> List[Model]:
-    m1 = Model(id=1)
-    m2 = Model(id=2)
-    return [m1, m2]
+async def SimpleQuery(*, transaction) -> Tuple[Model, ...]:
+    m1 = Model(id_=1)
+    m2 = Model(id_=2)
+    return (m1, m2)
 
 
 @query
-async def ArgsQuery(self, arg1: int, arg2: int = 2) -> List[BaseModel]:
-    m1 = Model(id=arg1)
-    m2 = Model(id=arg2)
+async def ArgsQuery(arg1: int, arg2: int = 2, *, transaction) -> List[BaseModel]:
+    m1 = Model(id_=arg1)
+    m2 = Model(id_=arg2)
     return [m1, m2]
 
 
@@ -49,10 +52,10 @@ class TestModelCache:
 
     def test_register_unique_primary_key(self, cache: ModelCache):
         # Model with unique key 1
-        m2 = Model(id=1)
+        m2 = Model(id_=1)
 
         # Model with duplicated key 1
-        m3 = Model(id=1)
+        m3 = Model(id_=1)
 
         # Registers model with unique key 1
         assert cache.register(m2)
@@ -64,9 +67,9 @@ class TestModelCache:
 
     def test_register_force(self, cache):
         # Model with unique key 1
-        m2 = Model(id=1)
+        m2 = Model(id_=1)
         # Model with duplicated key 1
-        m3 = Model(id=1)
+        m3 = Model(id_=1)
 
         # Registers model with unique key 1
         assert cache.register(m2)
@@ -77,9 +80,9 @@ class TestModelCache:
         assert cache.register(m3, True)
 
     def test_unregister(self, cache):
-        m2 = Model(id=1)
-        m3 = Model(id=2)
-        m4 = Model(id=3)
+        m2 = Model(id_=1)
+        m3 = Model(id_=2)
+        m4 = Model(id_=3)
 
         assert cache.register(m2)
         assert cache.register(m3)
@@ -117,25 +120,24 @@ class TestModelCache:
 
 
 class TestQueryCache:
-
     @pytest.fixture
     def cache(self):
         return QueryCache()
 
     @pytest.fixture
     async def query_simple(self):
-        q = SimpleQuery
-        return q, await q()
+        q = SimpleQuery()
+        return q, await q("transaction")  # type: ignore
 
     @pytest.fixture
     async def query_args_first(self):
         q = ArgsQuery(5, 6)
-        return q, await q()
+        return q, await q("transaction")  # type: ignore
 
     @pytest.fixture
     async def query_args_second(self):
         q = ArgsQuery(5, 7)
-        return q, await q()
+        return q, await q("transaction")  # type: ignore
 
     def test_init(self, cache):
         assert cache._cache == {}
@@ -149,7 +151,6 @@ class TestQueryCache:
         self.test_register_noargs(cache, query_simple)
         q, r = query_simple
         assert cache.get(q) == r
-        assert cache.get(q.__hash__()) == r
 
     def test_register_args(self, cache, query_args_first, query_args_second):
         qa, ra = query_args_first

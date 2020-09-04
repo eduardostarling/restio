@@ -12,18 +12,20 @@
 #
 import os
 import sys
-sys.path.insert(0, os.path.abspath('../../'))
+
+sys.path.insert(0, os.path.abspath("../../"))
+
 
 import restio
 
 # -- Project information -----------------------------------------------------
 
-project = 'restio'
-copyright = '2019, Eduardo Machado Starling'
-author = 'Eduardo Machado Starling'
+project = restio.__name__
+copyright = f"2019-2020, {restio.__author__}"
+author = restio.__author__
 
 # The full version, including alpha/beta/rc tags
-release = '0.0.1'
+release = restio.__version__
 
 
 # -- General configuration ---------------------------------------------------
@@ -31,11 +33,12 @@ release = '0.0.1'
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
-extensions = ['sphinx.ext.autodoc', 'm2r']
-source_suffix = ['.rst', '.md']
+master_doc = "index"
+extensions = ["sphinx.ext.autodoc"]
+source_suffix = [".rst"]
 
 # Add any paths that contain templates here, relative to this directory.
-templates_path = ['_templates']
+templates_path = ["_templates"]
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
@@ -53,4 +56,8 @@ html_theme = "sphinx_rtd_theme"
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ['_static']
+html_static_path = ["_static"]
+
+html_css_files = [
+    "theme.css",
+]

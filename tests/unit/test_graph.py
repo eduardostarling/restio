@@ -1,20 +1,22 @@
 import asyncio
 import itertools
-from collections import deque
-from random import randint
-from typing import Optional
 
 import pytest
 
-from restio.graph import DependencyGraph, NavigationDirection, Node, Tree
-from restio.model import BaseModel, mdataclass
+from restio.fields import ModelField, StrField
+from restio.graph import DependencyGraph, NavigationType, Node, Tree
+from restio.model import BaseModel
 
 
-@mdataclass
 class ModelMock(BaseModel):
-    name: str = ""
-    first_child: Optional[BaseModel] = None
-    second_child: Optional[BaseModel] = None
+    name: StrField = StrField()
+    first_child: ModelField[BaseModel] = ModelField(BaseModel)
+    second_child: ModelField[BaseModel] = ModelField(BaseModel)
+
+    def __init__(self, name, first_child=None, second_child=None):
+        self.name = name
+        self.first_child = first_child
+        self.second_child = second_child
 
 
 class ModelsFixture:
@@ -63,12 +65,21 @@ class ModelsFixture:
         model_i = ModelMock(name="I", first_child=model_d)
         model_a = ModelMock(name="A", first_child=model_b, second_child=model_c)
 
-        return [model_a, model_b, model_c, model_d, model_e, model_f, model_g, model_h, model_i]
+        return [
+            model_a,
+            model_b,
+            model_c,
+            model_d,
+            model_e,
+            model_f,
+            model_g,
+            model_h,
+            model_i,
+        ]
 
     @pytest.fixture
     def nodes(self, models):
-        model_a, model_b, model_c, model_d, model_e, \
-            model_f, model_g, model_h = models
+        model_a, model_b, model_c, model_d, model_e, model_f, model_g, model_h = models
 
         node_a = Node(model_a)
         node_b = Node(model_b)
@@ -96,8 +107,17 @@ class ModelsFixture:
 
     @pytest.fixture
     def nodes_complex(self, models_complex):
-        model_a, model_b, model_c, model_d, model_e, \
-            model_f, model_g, model_h, model_i = models_complex
+        (
+            model_a,
+            model_b,
+            model_c,
+            model_d,
+            model_e,
+            model_f,
+            model_g,
+            model_h,
+            model_i,
+        ) = models_complex
 
         node_a = Node(model_a)
         node_b = Node(model_b)
@@ -137,8 +157,7 @@ class ModelsFixture:
 
     @pytest.fixture
     def trees(self, nodes):
-        node_a, node_b, node_c, node_d, node_e, \
-            node_f, node_g, node_h = nodes
+        node_a, node_b, node_c, node_d, node_e, node_f, node_g, node_h = nodes
 
         tree_ab = Tree([node_a, node_b, node_c, node_d, node_e, node_f])
         tree_g = Tree([node_g, node_h])
@@ -147,8 +166,17 @@ class ModelsFixture:
 
     @pytest.fixture
     def trees_complex(self, nodes_complex):
-        node_a, node_b, node_c, node_d, node_e, \
-            node_f, node_g, node_h, node_i = nodes_complex
+        (
+            node_a,
+            node_b,
+            node_c,
+            node_d,
+            node_e,
+            node_f,
+            node_g,
+            node_h,
+            node_i,
+        ) = nodes_complex
 
         tree_ai = Tree(nodes_complex)
 
@@ -156,7 +184,6 @@ class ModelsFixture:
 
 
 class TestNode(ModelsFixture):
-
     def test_get_children(self, models, nodes):
         node_a = nodes[0]
         node_c = nodes[2]
@@ -166,8 +193,8 @@ class TestNode(ModelsFixture):
         children = node_a.get_children(recursive=False)
         all_children = node_a.get_children(recursive=True)
 
-        assert set(children) == set([node_c])
-        assert set(all_children) == set([node_c, node_e, node_f])
+        assert set(children) == {node_c}
+        assert set(all_children) == {node_c, node_e, node_f}
 
     def test_equal(self, models, nodes):
         node_a = nodes[0]
@@ -184,14 +211,18 @@ class TestNode(ModelsFixture):
 
 
 class TestTree(ModelsFixture):
-    async def validate_navigate(self, models, nodes, trees):
-        for tree, direction in itertools.product(trees, iter(NavigationDirection)):
+    async def validate_navigate(self, trees):
+        for tree, direction in itertools.product(
+            trees, (NavigationType.ROOTS_TO_LEAVES, NavigationType.LEAVES_TO_ROOTS),
+        ):
             processed_nodes = asyncio.Queue()
             navigated_nodes = set()
 
             # iterate over all nodes by immediately adding them to the queue
             # of processed nodes once they are yielded by the generator
-            async for node in tree.navigate(tree.get_nodes(), direction, processed_nodes):
+            async for node in tree.navigate(
+                tree.get_nodes(), direction, processed_nodes
+            ):
                 assert node is not None
                 navigated_nodes.add(node)
                 await processed_nodes.put(node)
@@ -203,16 +234,15 @@ class TestTree(ModelsFixture):
         return trees
 
     @pytest.mark.asyncio
-    async def test_navigation(self, models, nodes, trees):
-        await self.validate_navigate(models, nodes, trees)
+    async def test_navigation(self, trees):
+        await self.validate_navigate(trees)
 
     @pytest.mark.asyncio
-    async def test_navigation_complex(self, models_complex, nodes_complex, trees_complex):
-        await self.validate_navigate(models_complex, nodes_complex, trees_complex)
+    async def test_navigation_complex(self, trees_complex):
+        await self.validate_navigate(trees_complex)
 
 
 class TestGraph(ModelsFixture):
-
     def test_get_graph(self, models):
         graph = DependencyGraph.generate_from_objects(models)
 
@@ -229,8 +259,11 @@ class TestGraph(ModelsFixture):
         assert len(trees) == 2
         assert len(first_tree_roots) == 1
         assert len(second_tree_roots) == 2
-        assert set(map(lambda x: x.node_object, first_tree_roots)) == set([model_g])
-        assert set(map(lambda x: x.node_object, second_tree_roots)) == set([model_a, model_b])
+        assert set(map(lambda x: x.node_object, first_tree_roots)) == {model_g}
+        assert set(map(lambda x: x.node_object, second_tree_roots)) == {
+            model_a,
+            model_b,
+        }
 
     def test_circular_dependency(self, models):
         # slow test ahead
@@ -240,7 +273,9 @@ class TestGraph(ModelsFixture):
         models_for_circular.append(model_f)
 
         # will generate any permutation of (A, B, C, D, F)
-        permutations = itertools.permutations(models_for_circular, len(models_for_circular))
+        permutations = itertools.permutations(
+            models_for_circular, len(models_for_circular)
+        )
         for models_to_check in permutations:
             models_to_check = list(models_to_check)
             for model in models_for_circular:
