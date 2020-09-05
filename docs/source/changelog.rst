@@ -1,6 +1,10 @@
 Changelog
 =========
 
+1.0.0b2
+-------
+
+- Fixed bug that failed to properly check trees of models with deleted state.
 
 1.0.0b1
 -------

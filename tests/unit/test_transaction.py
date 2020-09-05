@@ -821,19 +821,19 @@ class TestTransaction(ModelsFixture):
 
         assert cached_a._state == ModelState.DELETED
 
-    def test_check_deleted_models(self, t, models):
+    def test_check_deleted_models(self, models):
         a, b, c = models
         a._state = ModelState.DELETED
         b._state = ModelState.DELETED
 
         with pytest.raises(RuntimeError):
-            t._check_deleted_models(models)
+            Transaction._check_deleted_models(models)
 
         c._state = ModelState.DELETED
-        t._check_deleted_models()
+        Transaction._check_deleted_models(models)
 
     commit_iterations = itertools.product(
-        [ModelState.NEW, ModelState.DIRTY, ModelState.DELETED], repeat=6
+        [ModelState.NEW, ModelState.DIRTY, ModelState.CLEAN], repeat=6
     )
 
     @pytest.mark.parametrize("states", commit_iterations)
@@ -855,10 +855,38 @@ class TestTransaction(ModelsFixture):
             assert model._state == ModelState.CLEAN
             assert model._persistent_values == {}
 
-        models_removed = set(
-            filter(lambda m: m._state == ModelState.DELETED, models_complex)
-        )
-        assert len(set(models_in_cache).intersection(models_removed)) == 0
+    commit_with_deleted_iterations = itertools.product(
+        [ModelState.NEW, ModelState.DIRTY, ModelState.CLEAN], repeat=3
+    )
+
+    @pytest.mark.parametrize("states", commit_with_deleted_iterations)
+    @pytest.mark.parametrize("tree_models", ("abc", "def"))
+    @pytest.mark.asyncio
+    async def test_commit_with_delete(self, t, models_complex, tree_models, states):
+        a, b, c, d, e, f = models_complex
+        models_modified = {a, b, c} if tree_models == "abc" else {d, e, f}
+        models_deleted = set(models_complex) - models_modified
+
+        t.register_dao(ModelDAO(ModelA))
+
+        for index, model in enumerate(models_modified):
+            model._state = states[index]
+
+        for model in models_deleted:
+            model._state = ModelState.DELETED
+
+        for model in models_complex:
+            t.register_model(model)
+
+        await t.commit()
+
+        models_in_cache = t._model_cache.get_all_models()
+
+        for model in models_in_cache:
+            assert model._state == ModelState.CLEAN
+            assert model._persistent_values == {}
+
+        assert len(set(models_in_cache).intersection(models_deleted)) == 0
 
     @pytest.mark.asyncio
     async def test_commit_exception(self, models_complex):
@@ -870,29 +898,37 @@ class TestTransaction(ModelsFixture):
         f._state = ModelState.NEW
         e._state = ModelState.NEW
         d._state = ModelState.DIRTY
+        c._state = ModelState.DELETED
         b._state = ModelState.DELETED
         a._state = ModelState.DELETED
-        a.ex = True
+        b.ex = True
 
         for model in models:
             t.register_model(model)
 
-        error_models, processed_models = await self._process_transaction(t)
+        (
+            error_models,
+            processed_models,
+            not_processed_models,
+        ) = await self._process_transaction(t)
 
-        a_cache, b_cache = [
-            t._model_cache.get_by_internal_id(ModelA, y._internal_id) for y in [a, b]
+        a_cache, b_cache, c_cache = [
+            t._model_cache.get_by_internal_id(ModelA, y._internal_id) for y in (a, b, c)
         ]
-        assert b_cache is None
+        assert c_cache is None
+        assert b_cache is not None
         assert a_cache is not None
+        assert b_cache._state == ModelState.DELETED
         assert a_cache._state == ModelState.DELETED
 
-        assert set(processed_models) == {f, e, d, b}
-        assert len(error_models) == 1
-        assert error_models.pop() == a
+        assert processed_models == {f, e, d, c}
+        assert error_models == {b}
+        assert not_processed_models == {a}
 
-    async def _process_transaction(self, transaction):
+    async def _process_transaction(self, transaction: Transaction):
         error_models = set()
         processed_models = set()
+        all_models = transaction._model_cache.get_all_models()
 
         for dao_task in await transaction.commit():
             try:
@@ -901,7 +937,8 @@ class TestTransaction(ModelsFixture):
             except Exception:
                 error_models.add(dao_task.model)
 
-        return error_models, processed_models
+        not_processed_models = all_models - error_models - processed_models
+        return error_models, processed_models, not_processed_models
 
     @pytest.mark.asyncio
     async def _check_exception_strategies(self, models, strategy, expected):
@@ -911,7 +948,7 @@ class TestTransaction(ModelsFixture):
         for model in reversed(models):
             t.register_model(model)
 
-        error_models, processed_models = await self._process_transaction(t)
+        error_models, processed_models, _ = await self._process_transaction(t)
 
         (
             expected_processed,

@@ -585,7 +585,7 @@ class Transaction:
             models_to_remove
         )
 
-        self._check_deleted_models(models_to_remove)
+        self._check_deleted_models(cached_values)
 
         # add, update and remove get one graph each, as
         # each level needs to be completely finished in
@@ -615,8 +615,8 @@ class Transaction:
             self.update_cache()
         return results
 
-    def _check_deleted_models(self, models: Optional[Set[BaseModel]] = None):
-        models = set(self._model_cache._id_cache.values()) if not models else models
+    @staticmethod
+    def _check_deleted_models(models: Set[BaseModel]):
         nodes = DependencyGraph._get_connected_nodes(models)
         for node in (n for n in nodes if n.node_object._state == ModelState.DELETED):
             for parent_node in node.get_parents(recursive=True):
