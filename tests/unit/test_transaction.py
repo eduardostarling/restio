@@ -258,6 +258,14 @@ class TestTransaction(ModelsFixture):
         assert await t.get(ModelA, key=2) == b
 
     @pytest.mark.asyncio
+    async def test_register_discarded_model(self, t):
+        a = ModelA(key=1, v=11)
+        a._state = ModelState.DISCARDED
+
+        with pytest.raises(RuntimeError):
+            t.register_model(a)
+
+    @pytest.mark.asyncio
     async def test_unregister_model(self, t):
         a = ModelA(key=1, v=11)
 
@@ -296,6 +304,8 @@ class TestTransaction(ModelsFixture):
 
         t.reset()
 
+        assert a._state == ModelState.DISCARDED
+        assert b._state == ModelState.DISCARDED
         assert not a._listener._listener[MODEL_PRE_UPDATE_EVENT]
         assert not a._listener._listener[MODEL_UPDATE_EVENT]
         assert not b._listener._listener[MODEL_PRE_UPDATE_EVENT]
@@ -386,6 +396,8 @@ class TestTransaction(ModelsFixture):
         assert await t.get(ModelA, key=1) == a
 
         t.reset()
+
+        assert a._state == ModelState.DISCARDED
         assert t._model_cache._id_cache == {}
         assert t._model_cache._key_cache == {}
         assert t._query_cache._cache == {}
@@ -679,13 +691,30 @@ class TestTransaction(ModelsFixture):
         t.register_dao(ModelDAO(ModelA))
 
         t.add(a)
-        with pytest.raises(RuntimeError):
-            t.add(a)
 
         cached_a = await t.get(ModelA, key=1)
 
         assert cached_a == a
         assert cached_a._state == ModelState.NEW
+
+    @pytest.mark.asyncio
+    async def test_add_model_twice(self, t, models):
+        a, _, _ = models
+        t.register_dao(ModelDAO(ModelA))
+
+        t.add(a)
+        with pytest.raises(RuntimeError, match="is already registered"):
+            t.add(a)
+
+    @pytest.mark.asyncio
+    async def test_add_discarded_model(self, t, models):
+        a, _, _ = models
+        t.register_dao(ModelDAO(ModelA))
+
+        a._state = ModelState.DISCARDED
+
+        with pytest.raises(RuntimeError, match="has been discarded"):
+            t.add(a)
 
     @pytest.mark.asyncio
     async def test_update_model(self, t, models):

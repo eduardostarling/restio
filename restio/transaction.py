@@ -187,6 +187,7 @@ class Transaction:
         Resets the internal cache. All references to models are lost.
         """
         for model in self._model_cache.get_all_models():
+            model._state = ModelState.DISCARDED
             self.unregister_model(model)
 
         self._model_cache.reset()
@@ -402,17 +403,14 @@ class Transaction:
                     " modified."
                 )
 
-    def _update(self, model: BaseModel) -> bool:
-        # During COMMIT, ROLLBACK and GET, all changes to models
-        # should be permanent, therefore we persist any change
-        # and avoid changing the state of the models
-        if self.state in (
-            TransactionState.COMMIT,
-            TransactionState.ROLLBACK,
-            TransactionState.GET,
-        ):
+    def _update(self, model: BaseModel, field: Field[T_co], value: T_co) -> bool:
+        # During ROLLBACK and GET, all changes to models should be permanent, therefore
+        # we persist any change and avoid changing the state of the models
+        if self.state in (TransactionState.ROLLBACK, TransactionState.GET):
             model._persist()
             return False
+
+        model._update_persistent_values(field, value)
 
         updated = False
 
@@ -433,6 +431,7 @@ class Transaction:
         model._state = new_state
         return updated
 
+    @transactionstate(TransactionState.GET)
     async def query(
         self, query: BaseQuery[ModelType], force: bool = False
     ) -> Tuple[ModelType, ...]:
@@ -490,6 +489,11 @@ class Transaction:
                               registered in the cache.
         :return: True if the model has been registered, False if it has been skipped.
         """
+        if model._state == ModelState.DISCARDED:
+            raise RuntimeError(
+                f"Model of id `{model._internal_id}` has been discarded and cannot be"
+                " registered again to a Transaction."
+            )
 
         children = model.get_children(recursive=True)
         for child in children:
@@ -504,10 +508,10 @@ class Transaction:
 
         registered = self._model_cache.register(model, force)
         if registered:
-            self._subscribe_update(model)
             model._state = ModelStateMachine.transition(
-                Transition.GET_OBJECT, model._state
+                Transition.REGISTER_OBJECT, model._state
             )
+            self._subscribe_update(model)
 
         return registered
 
@@ -558,6 +562,9 @@ class Transaction:
             if self._model_cache.has_model(model):
                 registered_model = await self.get(type(model), **model.primary_keys)
             else:
+                model._state = ModelStateMachine.transition(
+                    Transition.GET_OBJECT, model._state
+                )
                 self.register_model(model, force)
                 registered_model = model
 

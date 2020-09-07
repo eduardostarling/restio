@@ -296,6 +296,9 @@ class BaseModel(metaclass=BaseModelMeta):
         if field.pk:
             self._reset_primary_keys()
 
+        self._listener.dispatch(MODEL_UPDATE_EVENT, self, field, value)
+
+    def _update_persistent_values(self, field: Field[T_co], value: T_co):
         name: str = field.name
         if name in self._persistent_values:
             if value == self._persistent_values[name]:
@@ -304,8 +307,6 @@ class BaseModel(metaclass=BaseModelMeta):
             mutable_fields = self.fields
             if value != mutable_fields[name]:
                 self._persistent_values[name] = mutable_fields[name]
-
-        self._listener.dispatch(MODEL_UPDATE_EVENT, self)
 
     def __eq__(self, other: BaseModel) -> bool:
         if other and isinstance(other, type(self)):
