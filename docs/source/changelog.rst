@@ -6,7 +6,9 @@ Changelog
 
 - Fixed bug that failed to properly check trees of models with deleted state.
 - Fixed bug that would maintain an incorrect persistent state of models when a model was unbound from a transaction.
-- Added restriction in which it is not possible anymore to register a model after it has been discarded. Also, during a :code:`Transaction.reset()` all models are not marked as discarded.
+- Added restriction in which it is not possible anymore to register a model after it has been discarded. Also, during a :code:`Transaction.reset()` all models are now marked as discarded.
+- Added check that rejects model attribute updates when the provided values depend on models that are not yet in the transaction cache.
+
 
 1.0.0b1
 -------

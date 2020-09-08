@@ -220,8 +220,8 @@ class BaseModel(metaclass=BaseModelMeta):
                     else:
                         children.append(child)
 
-            # iterables are only supported if the values
-            # are not iterables - there is no recursiveness
+            # iterables are only supported if the values are not iterables - there is
+            # no recursiveness
             if isinstance(value, Iterable):
                 value: Iterable[Any]
                 for item in value:

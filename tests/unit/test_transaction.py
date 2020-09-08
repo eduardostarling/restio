@@ -90,8 +90,8 @@ class ModelFrozenDAO(BaseDAO):
             self.transaction.register_model(self.value)
 
     async def _method(self, obj: BaseModel):
-        obj.field = self.value  # type: ignore
         self._register_children()
+        obj.field = self.value  # type: ignore
 
     async def get(self, *, key: int):
         obj = self._model_type()
@@ -350,10 +350,10 @@ class TestTransaction(ModelsFixture):
     async def test_register_model_with_missing_children(self, t, models):
         _, b, c = models
 
-        with pytest.raises(RuntimeError):
+        with pytest.raises(ValueError):
             t.register_model(c)
 
-        with pytest.raises(RuntimeError):
+        with pytest.raises(ValueError):
             t.register_model(b)
 
     @pytest.mark.asyncio
@@ -624,7 +624,7 @@ class TestTransaction(ModelsFixture):
     async def test_query_that_doesnt_self_register_models(self, t, models):
         q = SimpleQueryRegister(register=False)
 
-        with pytest.raises(RuntimeError):
+        with pytest.raises(ValueError, match="is not valid"):
             await t.query(q)
 
     @pytest.mark.asyncio
@@ -669,11 +669,10 @@ class TestTransaction(ModelsFixture):
 
         q = SimpleQueryRegister(register=True)
 
-        # fails because the ModelA(key=1) returned by the query
-        # contains children that are not registered yet, and since
-        # there was already a ModelA(key=1) in the cache, the parent
-        # can't be registered
-        with pytest.raises(RuntimeError):
+        # fails because the ModelA(key=1) returned by the query contains children that
+        # are not registered yet, and since there was already a ModelA(key=1) in the
+        # cache, the parent can't be registered
+        with pytest.raises(ValueError):
             await t.query(q)
 
     @pytest.mark.asyncio
@@ -798,6 +797,96 @@ class TestTransaction(ModelsFixture):
         assert cached_a._persistent_values == {}
 
     @pytest.mark.asyncio
+    async def test_update_model_with_dependent_field(self, t, models):
+        parent, _, _ = models
+        t.register_dao(ModelDAO(ModelA))
+
+        old_parent_value = parent.ref
+
+        child = ModelA(key=1000)
+        t.register_model(child)
+        t.register_model(parent)
+
+        parent.ref = child
+
+        assert parent._state == ModelState.DIRTY
+        assert parent.ref == child
+        assert parent._persistent_values == {"ref": old_parent_value}
+
+    @pytest.mark.asyncio
+    async def test_update_model_with_iterable_dependent_field(self, t, models):
+        child, *_ = models
+
+        class Model(BaseModel):
+            ref: TupleModelField[ModelA] = TupleModelField(ModelA)
+
+        t.register_dao(ModelDAO(ModelA))
+        t.register_dao(ModelDAO(Model))
+
+        parent = Model()
+        old_parent_value = parent.ref
+
+        t.register_model(parent)
+        t.register_model(child)
+
+        parent.ref = (child,)
+
+        assert parent._state == ModelState.DIRTY
+        assert parent.ref == (child,)
+        assert parent._persistent_values == {"ref": old_parent_value}
+
+    @pytest.mark.parametrize(
+        "state, match",
+        [
+            (ModelState.CLEAN, "is not registered"),
+            (ModelState.UNBOUND, "its state is either"),
+            (ModelState.DISCARDED, "its state is either"),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_update_model_with_unregistered_dependent_field(
+        self, t, models, state, match
+    ):
+        parent, _, _ = models
+        t.register_dao(ModelDAO(ModelA))
+
+        child = ModelA(key=1000)
+        child._state = state
+
+        t.register_model(parent)
+
+        with pytest.raises(ValueError, match=match):
+            parent.ref = child
+
+    @pytest.mark.parametrize(
+        "state, match",
+        [
+            (ModelState.CLEAN, "is not registered"),
+            (ModelState.UNBOUND, "its state is either"),
+            (ModelState.DISCARDED, "its state is either"),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_update_model_with_unregistered_iterable_dependent_field(
+        self, t, models, state, match
+    ):
+        child, *_ = models
+
+        class Model(BaseModel):
+            ref: TupleModelField[ModelA] = TupleModelField(ModelA)
+
+        t.register_dao(ModelDAO(ModelA))
+        t.register_dao(ModelDAO(Model))
+
+        parent = Model()
+        child._state = state
+
+        t.register_model(parent)
+
+        with pytest.raises(ValueError, match=match):
+            parent.ref = (child,)
+
+    @pytest.mark.asyncio
     async def test_commit_new_primary_key(self, t, models):
         a, _, _ = models
         old_key = a.key
@@ -849,6 +938,30 @@ class TestTransaction(ModelsFixture):
         cached_a = await t.get(ModelA, key=1)
 
         assert cached_a._state == ModelState.DELETED
+
+    def test_check_model_is_valid(self, t, models):
+        a, b, c = models
+
+        for m in models:
+            t.register_model(m)
+
+        for m in models:
+            t._check_model_is_valid(m)
+
+    @pytest.mark.parametrize(
+        "state, match",
+        [
+            (ModelState.CLEAN, "is not registered"),
+            (ModelState.UNBOUND, "its state is either"),
+            (ModelState.DISCARDED, "its state is either"),
+        ],
+    )
+    def test_check_model_is_not_valid_missing_in_cache(self, t, models, state, match):
+        a, *_ = models
+
+        a._state = state
+        with pytest.raises(ValueError, match=match):
+            t._check_model_is_valid(a)
 
     def test_check_deleted_models(self, models):
         a, b, c = models
