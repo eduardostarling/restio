@@ -1,0 +1,20 @@
+[
+    {
+        "key": 1000,
+        "name": "Joseph Tribiani",
+        "age": 25,
+        "address": "1 Granville St, Vancouver, BC, VXX XXX, Canada"
+    },
+    {
+        "key": 1001,
+        "name": "Rachel Green",
+        "age": 22,
+        "address": "2 Granville St, Vancouver, BC, VXX XXX, Canada"
+    },
+    {
+        "key": 1002,
+        "name": "Unemployed Employee",
+        "age": 18,
+        "address": "The Netherlands"
+    }
+]

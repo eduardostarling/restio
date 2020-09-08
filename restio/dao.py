@@ -58,10 +58,9 @@ class BaseDAO(Generic[ModelType]):
     need to be overwritten unless the Transaction needs to make use of them. In that
     case, not implementing the method will cause the Transaction to fail in runtime for
     not-implemented `add`, `remove` or `update`. Methods that fail during a Transaction
-    commit might raise an Exception, which will be picked up by the Transaction and
-    casted to a TransactionException. Models can be modified in the methods of the DAO,
-    and the values will be persisted to the model's cache accordingly if the operation
-    is successful (no exception thrown).
+    commit might raise an Exception, which will be picked up by the Transaction. Models
+    can be modified in the methods of the DAO, and the values will be persisted to the
+    model's cache accordingly if the operation is successful (no exception thrown).
 
     It is recommended that each `get`, `add`, `remove` and `update` method is
     overwritten in the subclass if the operation is permitted by the REST API.

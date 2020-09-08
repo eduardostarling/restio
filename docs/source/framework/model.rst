@@ -212,6 +212,8 @@ The effect of using a relational field is that during a Transaction commit **res
 
 There are currently three types of :code:`ModelField` provided natively by **restio**: :code:`ModelField`, :code:`TupleModelField` and :code:`FrozenSetModelField`.
 
+Please note that it is not possible to create a relationship between models that are not yet registered in the :ref:`transaction` cache, so that **restio** can properly track changes on the dependencies. For instance, if you wish to add the :code:`company` above to the Transaction cache, then :code:`employee` should be registered first.
+
 
 Frozen fields
 ^^^^^^^^^^^^^

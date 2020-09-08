@@ -22,10 +22,10 @@ Some of the advantages of using **restio** in comparison with raw REST Client AP
 
 ### Pip
 
-You can install **restio** as a dependency to your project with pip:
+You can install the latest pre-release version of **restio** as a dependency to your project with pip:
 
 ```bash
-pip install restio
+pip install --pre restio
 ```
 
 ## Practical Example

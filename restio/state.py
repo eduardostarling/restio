@@ -40,6 +40,7 @@ class Transition(IntEnum):
     object.
     """
 
+    REGISTER_OBJECT = auto()
     GET_OBJECT = auto()
     PERSIST_OBJECT = auto()
     ADD_OBJECT = auto()
@@ -56,6 +57,7 @@ class ModelStateMachine:
     """
 
     _transitions: Dict[Tuple[Transition, ModelState], ModelState] = {
+        (Transition.REGISTER_OBJECT, ModelState.UNBOUND): ModelState.CLEAN,
         (Transition.GET_OBJECT, ModelState.UNBOUND): ModelState.CLEAN,
         (Transition.ADD_OBJECT, ModelState.UNBOUND): ModelState.NEW,
         (Transition.UPDATE_OBJECT, ModelState.CLEAN): ModelState.DIRTY,

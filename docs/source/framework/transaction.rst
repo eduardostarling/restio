@@ -133,6 +133,8 @@ The :code:`commit` method will inspect all models stored on the transaction's in
 
 Its is not up to the developer anymore to figure out in which order the operations need to be persisted on the remote server, and which models are unchanged. The transaction will take care of drawing the graph of dependencies between models and trigger all requests to the remote REST API in an optimal way.
 
+By default, :code:`commit()` enables the flag :code:`raise_for_status=True`, which will make an extra call to :code:`Transaction.raise_for_status()` at the end of the commit.
+
 
 Persistency Strategy
 --------------------
@@ -146,7 +148,7 @@ Transactions by default are instantiated with :code:`strategy=PersistentStrategy
 DAO Tasks
 ^^^^^^^^^
 
-**DAO Tasks** will store the result of the calls to the DAOs during a :code:`commit`, those being to either :code:`add`, :code:`update` or :code:`remove`. If anything goes wrong in one of those methods, then it is possible to revisit the results of all tasks performed by the :code:`commit`:
+**DAO Tasks** will store the result of the calls to the DAOs during a :code:`commit`, those being to either :code:`add`, :code:`update` or :code:`remove`. If anything goes wrong in one of those methods, then it is possible to revisit the results of all tasks performed by the :code:`commit` manually:
 
 .. code-block:: python
 
@@ -166,6 +168,31 @@ DAO Tasks
             # to treat it - below, we just print the stack trace to the
             # terminal
             dao_task.task.print_stack()
+
+It is also possible to raise a :code:`TransactionException` when at least one DAOTask has thrown an exception:
+
+.. code-block:: python
+
+    transaction.raise_for_status(tasks)
+
+:code:`TransactionException` will always contain two internal structures which can be used to iterate over the successful or failed tasks: :code:`successful_tasks` and :code:`exception_tasks`:
+
+.. code-block:: python
+
+    from restio.transaction import TransactionException
+
+    ...
+
+    try:
+        transaction.commit()  # raise_for_status=True, which calls Transaction.raise_for_status()
+    except TransactionException as exc:
+        for successful_task in exc.successful_tasks:
+            model = successful_task.model
+            print(f"Model {model} persisted successfully")
+
+        for failed_task, raised_exception in exc.exception_tasks:
+            model = failed_task.model  # the model that failed to update
+            print(f"Can't persist {model}: {raised_exception}")
 
 
 Rollback

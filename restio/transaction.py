@@ -126,6 +126,25 @@ def transactionstate(state: TransactionState):
     return deco
 
 
+class TransactionException(BaseException):
+    """
+    Raised when at least one Exception is raised by a DAOTask during a commit.
+    """
+
+    exception_tasks: List[Tuple[DAOTask, BaseException]]
+    sucessful_tasks: List[DAOTask]
+
+    def __init__(
+        self,
+        _exception_tasks: List[Tuple[DAOTask, BaseException]],
+        _successful_tasks: List[DAOTask],
+    ) -> None:
+        super().__init__("One or more DAOTasks failed during the commit.")
+
+        self.exception_tasks = _exception_tasks
+        self.sucessful_tasks = _successful_tasks
+
+
 class Transaction:
     """
     Manages a local transaction scope for interfacing with a remote REST API server.
@@ -187,6 +206,7 @@ class Transaction:
         Resets the internal cache. All references to models are lost.
         """
         for model in self._model_cache.get_all_models():
+            model._state = ModelState.DISCARDED
             self.unregister_model(model)
 
         self._model_cache.reset()
@@ -402,17 +422,23 @@ class Transaction:
                     " modified."
                 )
 
-    def _update(self, model: BaseModel) -> bool:
-        # During COMMIT, ROLLBACK and GET, all changes to models
-        # should be permanent, therefore we persist any change
-        # and avoid changing the state of the models
-        if self.state in (
-            TransactionState.COMMIT,
-            TransactionState.ROLLBACK,
-            TransactionState.GET,
-        ):
+    def _update(self, model: BaseModel, field: Field[T_co], value: T_co) -> bool:
+        # check if any value being passed is actually a model that is already
+        # registered in the cache, otherwise complains
+        if field.depends_on:
+            if isinstance(value, Iterable):
+                for v in value:
+                    self._check_model_is_valid(v)
+            elif isinstance(value, BaseModel):
+                self._check_model_is_valid(value)
+
+        # During ROLLBACK and GET, all changes to models should be permanent, therefore
+        # we persist any change and avoid changing the state of the models
+        if self.state in (TransactionState.ROLLBACK, TransactionState.GET):
             model._persist()
             return False
+
+        model._update_persistent_values(field, value)
 
         updated = False
 
@@ -433,6 +459,7 @@ class Transaction:
         model._state = new_state
         return updated
 
+    @transactionstate(TransactionState.GET)
     async def query(
         self, query: BaseQuery[ModelType], force: bool = False
     ) -> Tuple[ModelType, ...]:
@@ -490,24 +517,20 @@ class Transaction:
                               registered in the cache.
         :return: True if the model has been registered, False if it has been skipped.
         """
+        if model._state == ModelState.DISCARDED:
+            raise RuntimeError(
+                f"Model of id `{model._internal_id}` has been discarded and cannot be"
+                " registered again to a Transaction."
+            )
 
-        children = model.get_children(recursive=True)
-        for child in children:
-            if not self._model_cache.get_by_internal_id(
-                child.__class__, child._internal_id
-            ):
-                raise RuntimeError(
-                    f"Model of id `{child._internal_id}` ({child.__class__.__name__}) "
-                    f"is a child of `{model._internal_id}` ({model.__class__.__name__})"
-                    " and is not registered in cache."
-                )
+        self._check_models_children({model}, recursive=True)
 
         registered = self._model_cache.register(model, force)
         if registered:
-            self._subscribe_update(model)
             model._state = ModelStateMachine.transition(
-                Transition.GET_OBJECT, model._state
+                Transition.REGISTER_OBJECT, model._state
             )
+            self._subscribe_update(model)
 
         return registered
 
@@ -558,6 +581,9 @@ class Transaction:
             if self._model_cache.has_model(model):
                 registered_model = await self.get(type(model), **model.primary_keys)
             else:
+                model._state = ModelStateMachine.transition(
+                    Transition.GET_OBJECT, model._state
+                )
                 self.register_model(model, force)
                 registered_model = model
 
@@ -567,29 +593,31 @@ class Transaction:
         self._query_cache.register(query, registered_models)
 
     @transactionstate(TransactionState.COMMIT)
-    async def commit(self) -> List[DAOTask]:
+    async def commit(self, raise_for_status: bool = True) -> List[DAOTask]:
         """
         Persists all models on the remote server. Models that have been successfully
         submited are also persisted on the local cache by the end of the operation.
 
+        :param raise_for_status: The commit will raise a TransactionException if at
+                                 least one task executed in the commit raises an
+                                 exception.
         :return: A list containing all DAOTask's performed by the commit, in the order
                  in which the operations have been finalized.
         """
-        cached_values = self._model_cache.get_all_models()
+        cached_models = self._model_cache.get_all_models()
 
-        models_to_add = self._get_models_to_add(cached_values)
-        models_to_update = self._get_models_to_update(cached_values)
-        models_to_remove = self._get_models_to_remove(cached_values)
+        self._check_models_consistency(cached_models)
+
+        models_to_add = self._get_models_to_add(cached_models)
+        models_to_update = self._get_models_to_update(cached_models)
+        models_to_remove = self._get_models_to_remove(cached_models)
 
         all_models: Set[BaseModel] = models_to_add.union(models_to_update).union(
             models_to_remove
         )
 
-        self._check_deleted_models(cached_values)
-
-        # add, update and remove get one graph each, as
-        # each level needs to be completely finished in
-        # order for the next to proceed
+        # add, update and remove get one graph each, as each level needs to be
+        # completely finished in order for the next to proceed
         graphs = [
             DependencyGraph.generate_from_objects(m)
             for m in (models_to_add, models_to_update, models_to_remove)
@@ -613,12 +641,49 @@ class Transaction:
             for model in discarded_models:
                 self.unregister_model(model)
             self.update_cache()
+
+        if raise_for_status:
+            self.raise_for_status(results)
+
         return results
+
+    def _check_models_consistency(self, models: Set[ModelType]):
+        for model in models:
+            self._check_model_is_valid(model)
+
+        self._check_models_children(models, recursive=False)
+
+        self._check_deleted_models(models)
+
+    def _check_models_children(self, models: Set[ModelType], recursive: bool):
+        for model in models:
+            for child in model.get_children(recursive=recursive):
+                self._check_model_is_valid(child)
+
+    def _check_model_is_valid(self, model: ModelType):
+        status_valid = model._state not in (ModelState.DISCARDED, ModelState.UNBOUND,)
+
+        if not status_valid:
+            raise ValueError(
+                f"Model of id `{model._internal_id}` ({model.__class__.__name__}) is"
+                f" not valid because its state is either DISCARDED or UNBOUND."
+            )
+
+        found_in_cache = bool(
+            self._model_cache.get_by_internal_id(model.__class__, model._internal_id)
+        )
+
+        if not found_in_cache:
+            raise ValueError(
+                f"Model of id `{model._internal_id}` ({model.__class__.__name__}) is"
+                f" not valid because it is not registered to the cache."
+            )
 
     @staticmethod
     def _check_deleted_models(models: Set[BaseModel]):
         nodes = DependencyGraph._get_connected_nodes(models)
-        for node in (n for n in nodes if n.node_object._state == ModelState.DELETED):
+        deleted_nodes = (n for n in nodes if n.node_object._state == ModelState.DELETED)
+        for node in deleted_nodes:
             for parent_node in node.get_parents(recursive=True):
                 parent_model: BaseModel = parent_node.node_object
                 if parent_model._state not in (
@@ -778,6 +843,20 @@ class Transaction:
         models = self._get_clean_models()
         for model in models:
             self._model_cache.register(model, force=True)
+
+    @staticmethod
+    def raise_for_status(tasks: Iterable[DAOTask]):
+        exception_tasks = []
+        successful_tasks = []
+
+        for task in tasks:
+            if task.task.exception():
+                exception_tasks.append((task, task.task.exception()))
+            else:
+                successful_tasks.append(task)
+
+        if exception_tasks:
+            raise TransactionException(exception_tasks, successful_tasks)  # type: ignore
 
     @transactionstate(TransactionState.ROLLBACK)
     def rollback(self):

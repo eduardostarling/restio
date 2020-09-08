@@ -227,7 +227,7 @@ class CompanyDAO(BaseDAO[Company]):
     async def _gather_tasks(
         company: Company,
         employees: FrozenSet[Employee],
-        method: Callable[[str, int], []],
+        method: Callable[[str, int], Any],
     ):
         tasks = []
         for employee in employees:

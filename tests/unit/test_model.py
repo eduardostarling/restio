@@ -196,66 +196,37 @@ class TestModel:
         assert model.fields == {"a": 1}
         assert child_model.fields == {"a": 1, "b": ""}
 
-    def test_model_update(self):
+    def test_model_update_persistent_values(self):
         model = ModelA()
-        old_value = model.a
-        field = model._meta.fields["a"]
+        old_value_a = model.a
+        old_value_b = model.b
+        field_a = model._meta.fields["a"]
+        field_b = model._meta.fields["b"]
 
         assert model._persistent_values == {}
 
-        model._update(field, 55)
+        model._update_persistent_values(field_a, 55)
         assert model.is_field_modified("a")
-        assert model._persistent_values == {"a": old_value}
+        assert model._persistent_values == {"a": old_value_a}
 
-        model._update(field, 66)
+        model._update_persistent_values(field_b, "b")
         assert model.is_field_modified("a")
-        assert model._persistent_values == {"a": old_value}
+        assert model.is_field_modified("b")
+        assert model._persistent_values == {"a": old_value_a, "b": old_value_b}
 
-        model._update(field, old_value)
+        model._update_persistent_values(field_a, 66)
+        assert model.is_field_modified("a")
+        assert model.is_field_modified("b")
+        assert model._persistent_values == {"a": old_value_a, "b": old_value_b}
+
+        model._update_persistent_values(field_a, old_value_a)
         assert not model.is_field_modified("a")
+        assert model.is_field_modified("b")
+        assert model._persistent_values == {"b": old_value_b}
+
+        model._update_persistent_values(field_b, old_value_b)
+        assert not model.is_field_modified("b")
         assert model._persistent_values == {}
-
-    def test_change_field_value(self):
-        a = ModelA()
-
-        old_value_a, old_value_b = a.a, a.b
-        new_value_a = 11
-        new_value_b = "new value b"
-
-        a.a = new_value_a
-        assert a.a == new_value_a
-        assert a.b == old_value_b
-        assert a._persistent_values == {"a": old_value_a}
-
-        a.b = new_value_b
-        assert a.a == new_value_a
-        assert a.b == new_value_b
-        assert a._persistent_values == {"a": old_value_a, "b": old_value_b}
-
-        a.a = old_value_a
-        assert a.a == old_value_a
-        assert a.b == new_value_b
-        assert a._persistent_values == {"b": old_value_b}
-
-        a.b = old_value_b
-        assert a.a == old_value_a
-        assert a.b == old_value_b
-        assert not a._persistent_values
-
-    def test_change_field_value_two_instances(self):
-        model_a, model_b = ModelA(), ModelA()
-
-        old_model_a_value = model_a.a
-        old_model_b_value = model_b.a
-
-        model_a.a = 55
-        assert model_a._persistent_values == {"a": old_model_a_value}
-        assert model_b._persistent_values == {}
-
-        model_a.a = old_model_a_value
-        model_b.a = 55
-        assert model_a._persistent_values == {}
-        assert model_b._persistent_values == {"a": old_model_b_value}
 
     def test_model_update_dispatch(self):
         called = False
@@ -263,10 +234,12 @@ class TestModel:
 
         model = ModelA()
 
-        def listen(instance):
+        def listen(instance, field, value):
             nonlocal called, called_instance
             called = True
             called_instance = instance
+            assert field.name == "a"
+            assert value == 2
 
         model._listener.subscribe(MODEL_UPDATE_EVENT, listen)
 
@@ -274,6 +247,7 @@ class TestModel:
 
         assert called
         assert id(called_instance) == id(model)
+        assert model._persistent_values == {}
 
     def test_get_children(self):
         a, b1, b2, c = ModelA(), ModelB(), ModelB(), ModelC()
