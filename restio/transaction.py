@@ -126,6 +126,25 @@ def transactionstate(state: TransactionState):
     return deco
 
 
+class TransactionException(BaseException):
+    """
+    Raised when at least one Exception is raised by a DAOTask during a commit.
+    """
+
+    exception_tasks: List[Tuple[DAOTask, BaseException]]
+    sucessful_tasks: List[DAOTask]
+
+    def __init__(
+        self,
+        _exception_tasks: List[Tuple[DAOTask, BaseException]],
+        _successful_tasks: List[DAOTask],
+    ) -> None:
+        super().__init__("One or more DAOTasks failed during the commit.")
+
+        self.exception_tasks = _exception_tasks
+        self.sucessful_tasks = _successful_tasks
+
+
 class Transaction:
     """
     Manages a local transaction scope for interfacing with a remote REST API server.
@@ -574,11 +593,14 @@ class Transaction:
         self._query_cache.register(query, registered_models)
 
     @transactionstate(TransactionState.COMMIT)
-    async def commit(self) -> List[DAOTask]:
+    async def commit(self, raise_for_status: bool = True) -> List[DAOTask]:
         """
         Persists all models on the remote server. Models that have been successfully
         submited are also persisted on the local cache by the end of the operation.
 
+        :param raise_for_status: The commit will raise a TransactionException if at
+                                 least one task executed in the commit raises an
+                                 exception.
         :return: A list containing all DAOTask's performed by the commit, in the order
                  in which the operations have been finalized.
         """
@@ -619,6 +641,10 @@ class Transaction:
             for model in discarded_models:
                 self.unregister_model(model)
             self.update_cache()
+
+        if raise_for_status:
+            self.raise_for_status(results)
+
         return results
 
     def _check_models_consistency(self, models: Set[ModelType]):
@@ -817,6 +843,20 @@ class Transaction:
         models = self._get_clean_models()
         for model in models:
             self._model_cache.register(model, force=True)
+
+    @staticmethod
+    def raise_for_status(tasks: Iterable[DAOTask]):
+        exception_tasks = []
+        successful_tasks = []
+
+        for task in tasks:
+            if task.task.exception():
+                exception_tasks.append((task, task.task.exception()))
+            else:
+                successful_tasks.append(task)
+
+        if exception_tasks:
+            raise TransactionException(exception_tasks, successful_tasks)  # type: ignore
 
     @transactionstate(TransactionState.ROLLBACK)
     def rollback(self):

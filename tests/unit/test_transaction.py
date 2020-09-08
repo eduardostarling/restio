@@ -23,7 +23,7 @@ from restio.graph import DependencyGraph, NavigationType
 from restio.model import MODEL_PRE_UPDATE_EVENT, MODEL_UPDATE_EVENT, BaseModel
 from restio.query import query
 from restio.state import ModelState
-from restio.transaction import PersistencyStrategy, Transaction
+from restio.transaction import PersistencyStrategy, Transaction, TransactionException
 
 
 class ModelA(BaseModel):
@@ -1067,17 +1067,45 @@ class TestTransaction(ModelsFixture):
         assert error_models == {b}
         assert not_processed_models == {a}
 
+    @pytest.mark.parametrize("raise_for_status", [True, False])
+    @pytest.mark.parametrize(
+        "state", [ModelState.DIRTY, ModelState.NEW, ModelState.DELETED]
+    )
+    @pytest.mark.asyncio
+    async def test_commit_exception_raise_for_status(
+        self, models_complex, state, raise_for_status
+    ):
+        a, *_ = models_complex
+
+        t = Transaction(strategy=PersistencyStrategy.INTERRUPT_ON_ERROR)
+        t.register_dao(ModelDAOException(ModelA))
+
+        a._state = state
+        a.ex = True
+
+        t.register_model(a)
+
+        if not raise_for_status:
+            tasks = await t.commit(raise_for_status=raise_for_status)
+            assert any(t.task.exception() is not None for t in tasks)
+        else:
+            with pytest.raises(TransactionException) as exc:
+                await t.commit(raise_for_status=raise_for_status)
+            assert exc.value.exception_tasks
+
     async def _process_transaction(self, transaction: Transaction):
         error_models = set()
         processed_models = set()
         all_models = transaction._model_cache.get_all_models()
 
-        for dao_task in await transaction.commit():
-            try:
-                await dao_task
-                processed_models.add(dao_task.model)
-            except Exception:
-                error_models.add(dao_task.model)
+        with pytest.raises(TransactionException) as exc:
+            await transaction.commit()
+
+        for success_task in exc.value.sucessful_tasks:
+            processed_models.add(success_task.model)
+
+        for exception_task, _ in exc.value.exception_tasks:
+            error_models.add(exception_task.model)
 
         not_processed_models = all_models - error_models - processed_models
         return error_models, processed_models, not_processed_models
