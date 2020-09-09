@@ -111,7 +111,7 @@ Subsequent operations to the model will either cause its state to change to:
 
 - **DIRTY**, when the value of at least one model field changes when compared to persistent values.
 - **DELETED**, when marked for deletion through :code:`Transaction.remove`.
-- **DISCARDED**, when marked for deletion after adding, or when deleted during :code:`Transaction.commit`.
+- **DISCARDED**, when marked for deletion after adding, when deleted during :code:`Transaction.commit`, or when disposed via :code:`Transaction.reset()`.
 
 .. warning::
     Models with fields containing mutable collections (lists, sets or dicts) will not automatically be marked as **DIRTY** if items get added, removed or reordered. **restio** does not provide such fields out-of-the-box for this reason, and you should use immutable collections instead (e.g. :code:`TupleField`, :code:`FrozenSetField`, etc).
@@ -151,7 +151,7 @@ The logic for deciding the order in which models are persisted is the following:
 
 3. Models on the :code:`DELETED` group are inspected one-by-one. If any of these models contain at least one cached parent pointing to it that will still be persisted on the remote data store (in other words, parents that will not be deleted), then the commit is interrupted immediately before any task runs.
 
-4. Three dependencies graphs are drawn. The first graph include only models with state :code:`NEW`, the second only with models with state :code:`DIRTY` and the third only with models with state :code:`DELETED`. On all graphs, the parents of a model are the models referring to it in the same group, while the children are the models referred by it.
+4. Three dependency graphs are drawn. The first graph includes only models with state :code:`NEW`, the second only models with state :code:`DIRTY` and the third only models with state :code:`DELETED`. On all graphs, the parents of a model are the models referring to it in the same group, while the children are the models referred by it.
 
 5. The graphs are processed in order. The trees in :code:`NEW` and :code:`DIRTY` graphs are traversed from top to bottom (parents to children), while in the :code:`DELETED` graph the trees are traversed from bottom to top (children to parents). All operations from one graph need to be finalized so the next graph can be processed. Operations within each graph are optimized as follows:
 

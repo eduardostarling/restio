@@ -1206,7 +1206,7 @@ class TestTransaction(ModelsFixture):
         for model in models:
             model._state = ModelState.NEW
 
-        y = DependencyGraph.generate_from_objects(models)
+        y = DependencyGraph.generate_from_objects(set(models))
 
         processed_models = set()
         async for dao_task in t._process_tree(

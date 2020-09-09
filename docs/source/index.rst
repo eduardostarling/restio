@@ -28,7 +28,7 @@ You can install **restio** as a dependency to your project with pip:
 
 .. code-block:: bash
 
-   pip install restio
+   pip install --pre restio
 
 
 Documentation

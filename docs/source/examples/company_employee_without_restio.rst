@@ -213,24 +213,19 @@ Hiring a new employee :code:`Chandler Bing` to :code:`Amazing Company A` and mod
 .. code-block:: python
 
     async def main():
-        transaction = Transaction()
-        transaction.register_dao(EmployeeDAO(Employee))
-        transaction.register_dao(CompanyDAO(Company))
-
-        # loads Joseph Tribiani
-        joseph = await transaction.get(Employee, key=1000)
-        # loads the Amazing Company A
-        company_a = await transaction.get(Company, key="COMPANY_A")
+        joseph = await Employee.get(1000)
 
         # updates Joseph Tribiani's address
         joseph.address = "New address"
+        await joseph.update()
+
+        # loads the Amazing Company A
+        company_a = await Company.get("COMPANY_A")
 
         # hires Chandler Bing, that lives together with Joseph
-        chandler = Employee(name="Chandler Bing", age=26, address=joseph.address)
-        company_a.hire_employee(chandler)
-
-        # this is where all the requests are effectively made
-        await transaction.commit()
+        chandler = Employee(key=0, name="Chandler Bing", age=26, address=joseph.address)
+        await chandler.create()
+        await company_a.hire_employee(chandler)
 
 
 Full source code
