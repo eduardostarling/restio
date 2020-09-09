@@ -61,10 +61,12 @@ class ClientAPI:
         employees_url = f"{self.url}/employees"
         payload = json.dumps(employee)
 
-        await self.session.post(employees_url, data=payload.encode())
+        response = await self.session.post(employees_url, data=payload.encode())
 
-        new_employee_data = await self.get_employee_by_name(employee["name"])
-        return int(new_employee_data["key"])
+        location = response.headers["Location"]
+        key = location.split("/")[-1]
+
+        return int(key)
 
     async def update_employee(self, key: int, employee: Dict[str, Any]):
         employee_url = f"{self.url}/employees/{key}"
@@ -74,17 +76,6 @@ class ClientAPI:
     async def remove_employee(self, key: int):
         employee_url = f"{self.url}/employees/{key}"
         await self.session.delete(employee_url)
-
-    async def get_employee_by_name(self, name: str) -> Dict[str, Any]:
-        employees_url = f"{self.url}/employees"
-        result = await self.session.get(employees_url)
-        employees = await result.json()
-
-        for employee in employees:
-            if employee["name"] == name:
-                return employee
-
-        raise RuntimeError(f"Employee with name {name} not found.")
 
 
 # Model definition - this is where the relational data schema
@@ -206,9 +197,9 @@ For remote REST APIs, guaranteeing atomicity becomes a difficult job, as each ca
 If the same code above was to be called to a REST API client, you would typically see the following:
 
 ```python
-import restapiclient, Person
+from restapiclient import ClientAPI, Person
 
-client = restapiclient.ClientAPI()
+client = ClientAPI()
 
 def people():
     person1: Person = client.create_person(name="John", age=1)   # ok

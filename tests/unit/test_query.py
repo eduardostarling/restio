@@ -5,17 +5,17 @@ import pytest
 from restio.query import query
 
 
-@query
+@query  # type: ignore
 async def ArgsQuery(arg1: int, arg2: int = 2, *, transaction) -> Tuple[str, int]:
     return (transaction, arg2)
 
 
-@query
+@query  # type: ignore
 async def ArgsQuery2(arg1: int, arg2: int = 2, *, transaction) -> Tuple[str, int]:
     return (transaction, arg2)
 
 
-@query
+@query  # type: ignore
 async def QueryNoTransaction(arg1: int) -> Tuple[int]:
     return (arg1,)
 
@@ -47,7 +47,7 @@ class TestQueryCache:
     async def test_query_result(self):
         q = ArgsQuery(arg1=1, arg2=2)
 
-        assert await q("text") == ("text", 2)
+        assert await q("text") == ("text", 2)  # type: ignore
 
     @pytest.mark.asyncio
     async def test_query_manual_transaction(self):
@@ -59,13 +59,13 @@ class TestQueryCache:
     async def test_query_manual_transaction_overwrite(self):
         q = ArgsQuery(arg1=1, arg2=2, transaction="text")
 
-        assert await q("overwrite") == ("overwrite", 2)
+        assert await q("overwrite") == ("overwrite", 2)  # type: ignore
 
     @pytest.mark.asyncio
     async def test_query_no_transaction(self):
         q = QueryNoTransaction(arg1=1)
 
-        assert await q("text") == (1,)
+        assert await q("text") == (1,)  # type: ignore
 
     @pytest.mark.asyncio
     async def test_query_missing_transaction(self):

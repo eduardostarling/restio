@@ -28,21 +28,13 @@ Let's assume that a Client API library already exists to create :code:`Employee`
             employees_url = f"{self.url}/employees"
             payload = json.dumps(employee)
 
-            await self.session.post(employees_url, data=payload.encode())
+            response = await self.session.post(employees_url, data=payload.encode())
 
-            new_employee_data = await self.get_employee_by_name(employee["name"])
-            return int(new_employee_data["key"])
+            # get the key created by the server
+            location = response.headers["Location"]
+            key = location.split("/")[-1]
 
-        async def get_employee_by_name(self, name: str) -> Dict[str, Any]:
-            employees_url = f"{self.url}/employees"
-            result = await self.session.get(employees_url)
-            employees = await result.json()
-
-            for employee in employees:
-                if employee["name"] == name:
-                    return employee
-
-            raise RuntimeError(f"Employee with name {name} not found.")
+            return int(key)
 
 
 We can now use a **DAO** to persist the model :code:`Employee` using the :code:`ClientAPI`:
@@ -159,10 +151,13 @@ A complete implementation of the :code:`EmployeeDAO` and :code:`ClientAPI` for a
             employees_url = f"{self.url}/employees"
             payload = json.dumps(employee)
 
-            await self.session.post(employees_url, data=payload.encode())
+            response = await self.session.post(employees_url, data=payload.encode())
 
-            new_employee_data = await self.get_employee_by_name(employee["name"])
-            return int(new_employee_data["key"])
+            # get the key created by the server
+            location = response.headers["Location"]
+            key = location.split("/")[-1]
+
+            return int(key)
 
         async def update_employee(self, key: int, employee: Dict[str, Any]):
             employee_url = f"{self.url}/employees/{key}"
@@ -172,17 +167,6 @@ A complete implementation of the :code:`EmployeeDAO` and :code:`ClientAPI` for a
         async def remove_employee(self, key: int):
             employee_url = f"{self.url}/employees/{key}"
             await self.session.delete(employee_url)
-
-        async def get_employee_by_name(self, name: str) -> Dict[str, Any]:
-            employees_url = f"{self.url}/employees"
-            result = await self.session.get(employees_url)
-            employees = await result.json()
-
-            for employee in employees:
-                if employee["name"] == name:
-                    return employee
-
-            raise RuntimeError(f"Employee with name {name} not found.")
 
 
     class Employee(BaseModel):

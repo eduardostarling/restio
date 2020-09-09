@@ -1,5 +1,6 @@
 import asyncio
 import itertools
+from typing import List
 
 import pytest
 
@@ -207,7 +208,7 @@ class TestNode(ModelsFixture):
         assert node_a != node_c
         assert node_a != ""
         assert node_a is not None
-        assert node_a != Node(None)
+        assert node_a != Node(None)  # type: ignore
 
 
 class TestTree(ModelsFixture):
@@ -277,8 +278,7 @@ class TestGraph(ModelsFixture):
             models_for_circular, len(models_for_circular)
         )
         for models_to_check in permutations:
-            models_to_check = list(models_to_check)
             for model in models_for_circular:
                 model_f.first_child = model
                 with pytest.raises(RuntimeError, match="Circular dependency"):
-                    DependencyGraph.generate_from_objects(models_to_check)
+                    DependencyGraph.generate_from_objects(set(models_to_check))

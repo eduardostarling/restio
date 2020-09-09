@@ -25,5 +25,3 @@ More information
 ------------------
 
 The page :ref:`strategies` contains important information about the internals of **restio**. Please read this page if you consider using this framework in production.
-
-For other examples, please refer to the `examples <examples/>`_ folder.

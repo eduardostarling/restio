@@ -104,7 +104,7 @@ class TestDAOTask:
 
     @pytest.fixture
     def task_error(self, model: BaseModel, node: Node, dao: DAOMock):
-        return DAOTask(node, dao.error)
+        return DAOTask(node, dao.error)  # type: ignore
 
     def test_instantiate(self, task_add: DAOTask, node: Node, dao: DAOMock):
         assert task_add.node == node

@@ -26,6 +26,7 @@ author = restio.__author__
 
 # The full version, including alpha/beta/rc tags
 release = restio.__version__
+version = release
 
 
 # -- General configuration ---------------------------------------------------

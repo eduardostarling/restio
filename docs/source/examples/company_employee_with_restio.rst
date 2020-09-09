@@ -309,6 +309,8 @@ Hiring a new employee :code:`Chandler Bing` to :code:`Amazing Company A` can now
 
         # hires Chandler Bing, that lives together with Joseph
         chandler = Employee(name="Chandler Bing", age=26, address=joseph.address)
+        transaction.add(chandler)
+        
         company_a.hire_employee(chandler)
 
         # this is where all the requests are effectively made
