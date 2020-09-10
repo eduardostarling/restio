@@ -157,7 +157,7 @@ class DAOTask(Generic[ModelType]):
 
     def __init__(self, node: Node[ModelType], func: DAOTaskCallable):
         self.node = node
-        self.func = func  # type: ignore
+        self.func = func
         self.start_time = 0.0
         self.end_time = 0.0
         self._task = None
@@ -179,7 +179,7 @@ class DAOTask(Generic[ModelType]):
 
         task: asyncio.Task = asyncio.create_task(
             self.func(self.node.node_object)
-        )  # type: ignore
+        )
         task.add_done_callback(self._task_finished)
 
         self._task = task

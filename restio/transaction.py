@@ -846,6 +846,13 @@ class Transaction:
 
     @staticmethod
     def raise_for_status(tasks: Iterable[DAOTask]):
+        """
+        Raises a TransactionException if at least one resulting DAOTask from `tasks`
+        returned by Transaction.commit() contains an underlying exception raised.
+
+        :param tasks: The list of DAOTasks incoming from Transaction.commit()
+        :raises TransactionException: When at least one task has raised an exception.
+        """
         exception_tasks = []
         successful_tasks = []
 
@@ -856,7 +863,7 @@ class Transaction:
                 successful_tasks.append(task)
 
         if exception_tasks:
-            raise TransactionException(exception_tasks, successful_tasks)  # type: ignore
+            raise TransactionException(exception_tasks, successful_tasks)
 
     @transactionstate(TransactionState.ROLLBACK)
     def rollback(self):

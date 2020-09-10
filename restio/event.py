@@ -3,6 +3,7 @@ import weakref
 from typing import Any, Callable, Dict, Optional, Set, Union
 
 ListeningMethod = Union[weakref.WeakMethod, types.FunctionType]
+CallbackMethod = Union[types.MethodType, types.FunctionType, Callable[..., Any]]
 
 
 class EventListener:
@@ -27,7 +28,7 @@ class EventListener:
     def __init__(self):
         self._listener = {}
 
-    def subscribe(self, event: str, method: Callable[..., Any]):
+    def subscribe(self, event: str, method: CallbackMethod):
         """
         Subscribes the callback `method` to the event `event`.
 
@@ -42,7 +43,7 @@ class EventListener:
         self._listener.setdefault(event, set())
         self._listener[event].add(weak_method)
 
-    def unsubscribe(self, event: str, method: Callable[..., Any]):
+    def unsubscribe(self, event: str, method: CallbackMethod):
         """
         Unsubscribes the callback `method` from the event `event`.
 
@@ -53,11 +54,11 @@ class EventListener:
         if event in self._listener and weak_method in self._listener[event]:
             self._listener[event].remove(weak_method)
 
-    def _reference_method(self, method: Callable[..., Any]) -> ListeningMethod:
+    def _reference_method(self, method: CallbackMethod) -> ListeningMethod:
         if isinstance(method, types.MethodType):
-            return weakref.WeakMethod(method)  # type: ignore
+            return weakref.WeakMethod(method)
         elif isinstance(method, types.FunctionType):
-            return method  # type: ignore
+            return method
         else:
             raise TypeError(
                 "The parameter `method` must be either a method or a function"
@@ -85,7 +86,7 @@ class EventListener:
 
     def _resolve_reference(
         self, reference: ListeningMethod
-    ) -> Optional[Callable[..., Any]]:
+    ) -> Optional[CallbackMethod]:
         if isinstance(reference, weakref.WeakMethod):
             return reference()
         else:

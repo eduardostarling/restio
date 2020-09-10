@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 from uuid import UUID, uuid4
 
 from restio.event import EventListener
@@ -29,7 +29,7 @@ class BaseModelMeta(type):
     subclass by identifying fields and primary keys.
     """
 
-    def __new__(cls, name: str, bases: Iterable[Type[BaseModel]], dct: Dict[str, Any]):
+    def __new__(cls, name: str, bases: Tuple[Type, ...], dct: Dict[str, Any]):
         meta: ModelMeta = ModelMeta()
         dct["_meta"] = meta
 
@@ -37,8 +37,6 @@ class BaseModelMeta(type):
         dct["_internal_id"] = None
         dct["_listener"] = None
         dct["_persistent_values"] = None
-
-        model_class: BaseModel = super().__new__(cls, name, bases, dct)  # type: ignore
 
         base: Type[BaseModel]
         for base in bases:
@@ -53,11 +51,11 @@ class BaseModelMeta(type):
             if not isinstance(field_value, Field):
                 continue
 
-            model_class._meta.fields[field_name] = field_value
+            meta.fields[field_name] = field_value
             if field_value.pk:
-                model_class._meta.primary_keys[field_name] = field_value
+                meta.primary_keys[field_name] = field_value
 
-        return model_class
+        return super().__new__(cls, name, bases, dct)
 
     def __call__(self, *args, **kwargs):
         instance: BaseModel = super().__call__(*args, **kwargs)

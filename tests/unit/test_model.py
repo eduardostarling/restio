@@ -241,7 +241,7 @@ class TestModel:
             assert field.name == "a"
             assert value == 2
 
-        model._listener.subscribe(MODEL_UPDATE_EVENT, listen)
+        model._listener.subscribe(MODEL_UPDATE_EVENT, listen)  # type: ignore
 
         model.a = 2
 
