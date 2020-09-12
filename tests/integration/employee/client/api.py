@@ -1,5 +1,4 @@
 import asyncio
-import json
 import random
 from functools import partial
 from typing import Any, Dict, List, TypeVar
@@ -105,9 +104,12 @@ class ClientAPI:
         if response.status_code != 204:
             raise ValueError("Can't remove Employee from Company.")
 
-    async def _async(self, method: CallableMethod, *args, **kwargs) -> CallableMethod:
+    async def _async(
+        self, method: CallableMethod, *args, delay: bool = True, **kwargs
+    ) -> CallableMethod:
         # fakes network delay, 50-100ms
-        await asyncio.sleep(random.randint(50, 100) / 1000)
+        if delay:
+            await asyncio.sleep(random.randint(50, 100) / 1000)
         return await asyncio.get_event_loop().run_in_executor(
             None, partial(method, *args, **kwargs)
         )
