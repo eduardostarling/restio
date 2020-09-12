@@ -155,7 +155,7 @@ class TestModel:
 
         model_b._internal_id = model_a._internal_id
 
-        assert model_a == model_b
+        assert model_a != model_b
 
     @pytest.mark.parametrize(
         "model, expected_fields, expected_dependency_fields",

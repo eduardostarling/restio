@@ -65,6 +65,7 @@ class BaseModelMeta(type):
             field._store_default(instance, force=False)
 
         instance._internal_id = uuid4()
+        instance._hash = hash((instance.__class__, str(instance._internal_id)))
         instance._persistent_values = {}
         instance._listener = EventListener()
         instance._initialized = True
@@ -114,10 +115,11 @@ class BaseModel(metaclass=BaseModelMeta):
     _meta: ModelMeta
 
     __state: ModelState = ModelState.UNBOUND
-    __primary_keys: Optional[Dict[str, T_co]] = None
+    __primary_keys: Optional[Dict[str, Any]] = None
     _initialized: bool = False
 
     _internal_id: UUID
+    _hash: int
     _persistent_values: Dict[str, Any]
     _listener: EventListener
 
@@ -307,10 +309,7 @@ class BaseModel(metaclass=BaseModelMeta):
                 self._persistent_values[name] = mutable_fields[name]
 
     def __eq__(self, other: BaseModel) -> bool:
-        if other and isinstance(other, type(self)):
-            return self._internal_id == other._internal_id
+        return isinstance(other, self.__class__) and self._hash == other._hash
 
-        return False
-
-    def __hash__(self):
-        return hash(str(self._internal_id))
+    def __hash__(self) -> int:
+        return self._hash
