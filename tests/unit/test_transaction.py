@@ -240,7 +240,7 @@ class TestTransaction(ModelsFixture):
         return Transaction()
 
     def test_init(self, t):
-        assert t._model_cache._id_cache == {}
+        assert t._model_cache._id_cache == set()
         assert t._model_cache._key_cache == {}
         assert t._query_cache._cache == {}
 
@@ -252,7 +252,7 @@ class TestTransaction(ModelsFixture):
         t.register_model(a)
         t.register_model(b)
 
-        assert len(t._model_cache._id_cache.values()) == 2
+        assert len(t._model_cache._id_cache) == 2
         assert len(t._model_cache._key_cache.values()) == 2
         assert await t.get(ModelA, key=1) == a
         assert await t.get(ModelA, key=2) == b
@@ -293,7 +293,7 @@ class TestTransaction(ModelsFixture):
         t.register_model(a)
         t.register_model(b)
 
-        assert len(t._model_cache._id_cache.values()) == 2
+        assert len(t._model_cache._id_cache) == 2
         assert len(t._model_cache._key_cache.values()) == 2
         assert await t.get(ModelA, key=1) == a
         assert await t.get(ModelA, key=2) == b
@@ -398,7 +398,7 @@ class TestTransaction(ModelsFixture):
         t.reset()
 
         assert a._state == ModelState.DISCARDED
-        assert t._model_cache._id_cache == {}
+        assert t._model_cache._id_cache == set()
         assert t._model_cache._key_cache == {}
         assert t._query_cache._cache == {}
 
@@ -1055,13 +1055,13 @@ class TestTransaction(ModelsFixture):
         ) = await self._process_transaction(t)
 
         a_cache, b_cache, c_cache = [
-            t._model_cache.get_by_internal_id(ModelA, y._internal_id) for y in (a, b, c)
+            t._model_cache.is_registered_by_id(y) for y in (a, b, c)
         ]
-        assert c_cache is None
-        assert b_cache is not None
-        assert a_cache is not None
-        assert b_cache._state == ModelState.DELETED
-        assert a_cache._state == ModelState.DELETED
+        assert not c_cache
+        assert b_cache
+        assert a_cache
+        assert b._state == ModelState.DELETED
+        assert a._state == ModelState.DELETED
 
         assert processed_models == {f, e, d, c}
         assert error_models == {b}

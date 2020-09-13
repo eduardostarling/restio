@@ -194,8 +194,8 @@ class TestNode(ModelsFixture):
         children = node_a.get_children(recursive=False)
         all_children = node_a.get_children(recursive=True)
 
-        assert set(children) == {node_c}
-        assert set(all_children) == {node_c, node_e, node_f}
+        assert children == {node_c}
+        assert all_children == {node_c, node_e, node_f}
 
     def test_equal(self, models, nodes):
         node_a = nodes[0]

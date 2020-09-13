@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type
 from uuid import UUID, uuid4
 
 from restio.event import EventListener
@@ -29,7 +29,7 @@ class BaseModelMeta(type):
     subclass by identifying fields and primary keys.
     """
 
-    def __new__(cls, name: str, bases: Iterable[Type[BaseModel]], dct: Dict[str, Any]):
+    def __new__(cls, name: str, bases: Tuple[Type, ...], dct: Dict[str, Any]):
         meta: ModelMeta = ModelMeta()
         dct["_meta"] = meta
 
@@ -37,8 +37,6 @@ class BaseModelMeta(type):
         dct["_internal_id"] = None
         dct["_listener"] = None
         dct["_persistent_values"] = None
-
-        model_class: BaseModel = super().__new__(cls, name, bases, dct)  # type: ignore
 
         base: Type[BaseModel]
         for base in bases:
@@ -53,11 +51,11 @@ class BaseModelMeta(type):
             if not isinstance(field_value, Field):
                 continue
 
-            model_class._meta.fields[field_name] = field_value
+            meta.fields[field_name] = field_value
             if field_value.pk:
-                model_class._meta.primary_keys[field_name] = field_value
+                meta.primary_keys[field_name] = field_value
 
-        return model_class
+        return super().__new__(cls, name, bases, dct)
 
     def __call__(self, *args, **kwargs):
         instance: BaseModel = super().__call__(*args, **kwargs)
@@ -67,6 +65,7 @@ class BaseModelMeta(type):
             field._store_default(instance, force=False)
 
         instance._internal_id = uuid4()
+        instance._hash = hash((instance.__class__, str(instance._internal_id)))
         instance._persistent_values = {}
         instance._listener = EventListener()
         instance._initialized = True
@@ -116,10 +115,11 @@ class BaseModel(metaclass=BaseModelMeta):
     _meta: ModelMeta
 
     __state: ModelState = ModelState.UNBOUND
-    __primary_keys: Optional[Dict[str, T_co]] = None
+    __primary_keys: Optional[Dict[str, Any]] = None
     _initialized: bool = False
 
     _internal_id: UUID
+    _hash: int
     _persistent_values: Dict[str, Any]
     _listener: EventListener
 
@@ -174,9 +174,9 @@ class BaseModel(metaclass=BaseModelMeta):
     def get_children(
         self,
         recursive: bool = False,
-        children: Optional[List[BaseModel]] = None,
+        children: Optional[Set[BaseModel]] = None,
         top_level: Optional[BaseModel] = None,
-    ) -> List[BaseModel]:
+    ) -> Set[BaseModel]:
         """
         Returns the list of all children of the current model. This algorithm checks in
         runtime for all objects refered by the instance and that are part of fields
@@ -196,14 +196,13 @@ class BaseModel(metaclass=BaseModelMeta):
         """
 
         if children is None:
-            children = []
+            children = set()
 
         if top_level:
             if self == top_level:
                 return children
 
-            if self not in children:
-                children.append(self)
+            children.add(self)
         else:
             top_level = self
 
@@ -211,14 +210,13 @@ class BaseModel(metaclass=BaseModelMeta):
 
             def check(child: Optional[BaseModel]):
                 # this can happen when the field allows none
-                if not child:
+                if not child or child in children:  # type: ignore
                     return
 
-                if child not in children:  # type: ignore
-                    if recursive:
-                        child.get_children(recursive, children, top_level)
-                    else:
-                        children.append(child)
+                if recursive:
+                    child.get_children(recursive, children, top_level)
+                else:
+                    children.add(child)
 
             # iterables are only supported if the values are not iterables - there is
             # no recursiveness
@@ -309,10 +307,7 @@ class BaseModel(metaclass=BaseModelMeta):
                 self._persistent_values[name] = mutable_fields[name]
 
     def __eq__(self, other: BaseModel) -> bool:
-        if other and isinstance(other, type(self)):
-            return self._internal_id == other._internal_id
+        return isinstance(other, self.__class__) and self._hash == other._hash
 
-        return False
-
-    def __hash__(self):
-        return hash(str(self._internal_id))
+    def __hash__(self) -> int:
+        return self._hash

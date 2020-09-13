@@ -69,6 +69,26 @@ class CompanyDAO(BaseDAO[Company]):
         return company
 
     @query
+    async def get_all_companies(self) -> List[Company]:
+        companies = [self._from_dict(e) for e in await self.api.get_all_companies()]
+        employee_tasks = []
+
+        for company in companies:
+            company_employees_query = self.get_company_employees(
+                company_key=company.key
+            )
+            company_employees_coro = self.transaction.query(
+                company_employees_query, force=True
+            )
+            employee_tasks.append(asyncio.create_task(company_employees_coro))
+
+        results = await asyncio.gather(*employee_tasks)
+        for company, employees in zip(companies, results):
+            company.employees = frozenset(employees)
+
+        return companies
+
+    @query
     async def get_company_employees(self, company_key: str) -> FrozenSet[Employee]:
         employees_list = await self.api.get_company_employees(company_key)
         return frozenset(EmployeeDAO._from_dict(e) for e in employees_list)

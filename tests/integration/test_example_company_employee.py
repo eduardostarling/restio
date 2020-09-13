@@ -1,50 +1,15 @@
 from typing import Tuple
 
 import pytest
-from flask.testing import FlaskClient
 
-import tests.integration.employee.server as server
-from restio.state import ModelState
 from restio.transaction import Transaction, TransactionException
 from tests.integration.employee.client.api import ClientAPI
 from tests.integration.employee.client.daos import CompanyDAO, EmployeeDAO
 from tests.integration.employee.client.models import Company, Employee
+from tests.integration.employee.fixture import CompanyEmployeeFixture
 
 
-class TestIntegrationCompanyEmployee:
-
-    # tests setup
-
-    @pytest.fixture(scope="function")
-    def client(self) -> FlaskClient:
-        server.app.config["TESTING"] = True
-
-        with server.app.test_client() as client:
-            with server.app.app_context():
-                server.init_db()
-            yield client  # type: ignore
-
-    @pytest.fixture(scope="function")
-    def api(self, client: FlaskClient) -> ClientAPI:
-        return ClientAPI(client)
-
-    @pytest.fixture(scope="function")
-    def employee_dao(self, api) -> EmployeeDAO:
-        return EmployeeDAO(api)
-
-    @pytest.fixture(scope="function")
-    def transaction(self, api: ClientAPI, employee_dao: EmployeeDAO) -> Transaction:
-        return self._get_transaction(api, employee_dao)
-
-    def _get_transaction(self, api: ClientAPI, employee_dao: EmployeeDAO):
-        transaction = Transaction()
-        transaction.register_dao(employee_dao)
-        transaction.register_dao(CompanyDAO(api))
-
-        return transaction
-
-    # test cases
-
+class TestIntegrationCompanyEmployee(CompanyEmployeeFixture):
     @pytest.mark.asyncio
     async def test_get_employee(self, transaction: Transaction):
         employee = await transaction.get(Employee, key=1000)
@@ -78,6 +43,16 @@ class TestIntegrationCompanyEmployee:
         assert company.employees
 
     @pytest.mark.asyncio
+    async def test_get_all_companies(
+        self, transaction: Transaction, company_dao: CompanyDAO
+    ):
+        q = company_dao.get_all_companies()
+        companies: Tuple[Company, ...] = await transaction.query(q)
+
+        assert len(companies) == 2
+        assert sum(len(c.employees) for c in companies) == 2
+
+    @pytest.mark.asyncio
     async def test_get_company_that_doesnt_exist(self, transaction: Transaction):
         with pytest.raises(ValueError):
             await transaction.get(Company, key="COMPANY_5555")
@@ -98,7 +73,11 @@ class TestIntegrationCompanyEmployee:
 
     @pytest.mark.asyncio
     async def test_create_employee(
-        self, transaction: Transaction, api: ClientAPI, employee_dao: EmployeeDAO
+        self,
+        transaction: Transaction,
+        api: ClientAPI,
+        employee_dao: EmployeeDAO,
+        company_dao: CompanyDAO,
     ):
         new_employee = Employee(name="Chandler Bing", age=26, address="California")
         transaction.add(new_employee)
@@ -108,7 +87,7 @@ class TestIntegrationCompanyEmployee:
 
         assert new_employee.key is not None
 
-        new_transaction = self._get_transaction(api, employee_dao)
+        new_transaction = self._get_transaction(api, employee_dao, company_dao)
         added_employee = await new_transaction.get(Employee, key=new_employee.key)
 
         assert added_employee.name == new_employee.name
@@ -145,7 +124,11 @@ class TestIntegrationCompanyEmployee:
 
     @pytest.mark.asyncio
     async def test_update_employee_address(
-        self, transaction: Transaction, api: ClientAPI, employee_dao: EmployeeDAO
+        self,
+        transaction: Transaction,
+        api: ClientAPI,
+        employee_dao: EmployeeDAO,
+        company_dao: CompanyDAO,
     ):
         employee = await transaction.get(Employee, key=1000)
         assert employee.address != "Brazil"
@@ -153,7 +136,7 @@ class TestIntegrationCompanyEmployee:
         employee.address = "Brazil"
         await transaction.commit()
 
-        new_transaction = self._get_transaction(api, employee_dao)
+        new_transaction = self._get_transaction(api, employee_dao, company_dao)
         updated_employee = await new_transaction.get(Employee, key=1000)
 
         assert updated_employee != employee

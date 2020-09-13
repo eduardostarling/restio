@@ -23,6 +23,8 @@ darglint = "*"
 pytest-black = "*"
 isort = "*"
 flask = "*"
+pytest-benchmark = {extras = ["histogram"], version = "*"}
+pycallgraph = "*"
 
 [packages]
 restio = {editable = true,path = "."}
@@ -31,6 +33,8 @@ restio = {editable = true,path = "."}
 python_version = "3.8"
 
 [scripts]
-test = "pytest"
+test = "pytest -c pytest.ini"
 docs = "sphinx-build -b html docs/source docs/build"
 build = "python setup.py sdist bdist_wheel"
+benchmark-tests = "pytest -c pytest-benchmark.ini"
+profile-tests = "pytest -c pytest-profile.ini"

@@ -50,6 +50,40 @@ or by directly running Pytest from the root of the repository:
 pytest
 ```
 
+### Performance Testing
+
+There are two types of performance analysis available in this project: benchmarking and profiling.
+
+For profiling, it is necessary [to also have `graphviz` installed on the environment](http://www.graphviz.org/download/).
+
+**Running Benchmark Tests**:
+
+```bash
+pipenv run benchmark-tests
+```
+
+or
+
+```bash
+pytest -c pytest-benchmark.ini
+```
+
+The commands above will run all iterations for all tests under `tests/performance`.
+
+**Running Profile Tests**:
+
+```bash
+pipenv run profile-tests
+```
+
+or
+
+```bash
+pytest -c pytest-profile.ini
+```
+
+The commands above will only run iterations with 1024 elements for all tests under `tests/performance`.
+
 ### Building the documentation
 
 ```bash
