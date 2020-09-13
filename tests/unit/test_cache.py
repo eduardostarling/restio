@@ -30,25 +30,26 @@ async def ArgsQuery(arg1: int, arg2: int = 2, *, transaction) -> List[BaseModel]
 
 
 class TestModelCache:
-    def setup_method(self, method):
-        self.x = ModelCache()
-        self.m = Model()
-
     @pytest.fixture
     def cache(self):
         return ModelCache()
 
+    @pytest.fixture
+    def m(self):
+        return Model()
+
     def test_init(self, cache):
-        assert cache._id_cache == {}
+        assert cache._id_cache == set()
         assert cache._key_cache == {}
 
-    def test_register_unique_internal_id(self, cache):
+    def test_register_unique_internal_id(self, cache: ModelCache, m: Model):
         # Checks if model does not exist in cache
-        assert cache.get_by_internal_id(Model, self.m._internal_id) is None
+        assert not cache.is_registered_by_id(m)
         # Registers model in cache
-        assert cache.register(self.m)
+        assert cache.register(m)
+        assert cache.is_registered_by_id(m)
         # Tries to register the same model again
-        assert not cache.register(self.m)
+        assert not cache.register(m)
 
     def test_register_unique_primary_key(self, cache: ModelCache):
         # Model with unique key 1
@@ -65,7 +66,21 @@ class TestModelCache:
         assert not cache.register(m2)
         assert not cache.register(m3)
 
-    def test_register_force(self, cache):
+    def test_has_model_with_keys(self, cache: ModelCache):
+        m2 = Model(id_=1)
+        m3 = Model(id_=1)
+
+        assert cache.register(m2)
+        assert cache.has_model_with_keys(m2)
+        assert cache.has_model_with_keys(m3)
+
+    def test_has_keys(self, cache: ModelCache):
+        m2 = Model(id_=1)
+
+        assert cache.register(m2)
+        assert cache.has_keys(cache._get_type_key_hash(m2))
+
+    def test_register_force(self, cache: ModelCache):
         # Model with unique key 1
         m2 = Model(id_=1)
         # Model with duplicated key 1
@@ -79,7 +94,7 @@ class TestModelCache:
         assert cache.register(m2, True)
         assert cache.register(m3, True)
 
-    def test_unregister(self, cache):
+    def test_unregister(self, cache: ModelCache):
         m2 = Model(id_=1)
         m3 = Model(id_=2)
         m4 = Model(id_=3)
@@ -91,30 +106,21 @@ class TestModelCache:
         with pytest.raises(ValueError):
             cache.unregister(m4)
 
-        assert len(cache._id_cache.values()) == 1
+        assert len(cache._id_cache) == 1
         assert len(cache._key_cache.values()) == 1
 
-    def test_get_by_internal_id(self, cache):
-        self.test_register_unique_internal_id(cache)
-        # Checks if model now exists in cache
-        c = cache.get_by_internal_id(Model, self.m._internal_id)
-        assert c is not None
-        # Checks if another type does not exist in cache
-        assert cache.get_by_internal_id(BaseModel, "fake") is None
-
-    def test_get(self, cache):
+    def test_get(self, cache: ModelCache):
         self.test_register_unique_primary_key(cache)
         # Checks if model now exists in cache
-        assert cache.get_by_primary_key(Model, (1,)) is not None
+        assert cache.get_by_primary_key((Model, (1,))) is not None
         # Checks if another type does not exist in cache
-        assert cache.get_by_primary_key(BaseModel, (1,)) is None
+        assert cache.get_by_primary_key((BaseModel, (1,))) is None
 
-    def test_get_by_primary_key(self, cache):
-        m = Model()
+    def test_get_by_primary_key(self, cache: ModelCache, m: Model):
         m.id = 1
 
         cache.register(m)
-        first_ref = cache.get_by_primary_key(Model, (m.id,))
+        first_ref = cache.get_by_primary_key((Model, (m.id,)))
 
         assert first_ref == m
 

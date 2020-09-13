@@ -10,6 +10,8 @@ Changelog
 - Added check that rejects model attribute updates when the provided values depend on models that are not yet in the transaction cache.
 - Added a static method :code:`Transaction.raise_for_status(tasks)` that raises a :code:`TransactionException` with all the :code:`tasks` that failed and all that succeeded during a :code:`Transaction.commit()`.
 - **BREAKING CHANGE**: Changed the behavior of :code:`Transaction.commit()` to automatically call :code:`Transaction.raise_for_status()` whenever :code:`raise_for_status=True` (default).
+- Improved performance when registering objects to the transaction cache. Registering a new object to a transaction that already contains many models registered will now be faster. Also, applies when queries retrieve multiple objects at once.
+- **BREAKING CHANGE**: :code:`BaseModel.get_children()` now returns a :code:`Set` instead of a :code:`List`. This also applies to the input argument :code:`children`.
 
 
 1.0.0b1

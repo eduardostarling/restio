@@ -280,7 +280,7 @@ class Transaction:
         async with model_lock:
             pks: Tuple[Any, ...] = tuple(pks_dict.values())
             model: Optional[ModelType] = self._model_cache.get_by_primary_key(
-                model_type, pks
+                (model_type, pks)
             )
             if model:
                 return model
@@ -321,22 +321,18 @@ class Transaction:
         dao = self.get_dao(type(model))
         check_dao_implemented_method(dao.add)
 
-        model_cache = self._model_cache.get_by_internal_id(
-            model.__class__, model._internal_id
-        )
-        if model_cache:
+        if self._model_cache.is_registered_by_id(model):
             raise RuntimeError(
                 f"Model of id `{model._internal_id}` is already registered in internal"
                 " cache."
             )
 
-        obj_type, obj_keys, _ = self._model_cache._get_type_key_hash(model)
+        obj_type, obj_keys = key_hash = self._model_cache._get_type_key_hash(model)
         if obj_keys:
-            model_cache = self._model_cache.get_by_primary_key(obj_type, obj_keys)
-            if model_cache:
+            if self._model_cache.has_keys(key_hash):
                 raise RuntimeError(
-                    f"Model with keys `{obj_keys}` is already registered in internal"
-                    " cache."
+                    f"Model with type `{obj_type.__class__.__name__}` and keys"
+                    " `{obj_keys}` is already registered in internal cache."
                 )
 
         for field in model._meta.fields.values():
@@ -355,25 +351,20 @@ class Transaction:
         dao = self.get_dao(type(model))
         check_dao_implemented_method(dao.remove)
 
-        model_cache = self._assert_cache_internal_id(model)
-        model_cache._state = ModelStateMachine.transition(
-            Transition.REMOVE_OBJECT, model_cache._state
+        self._assert_cache_internal_id(model)
+        model._state = ModelStateMachine.transition(
+            Transition.REMOVE_OBJECT, model._state
         )
 
-        return model_cache._state == ModelState.DELETED
+        return model._state == ModelState.DELETED
 
-    def _assert_cache_internal_id(self, model: ModelType) -> ModelType:
+    def _assert_cache_internal_id(self, model: ModelType):
         _check_model_type(model)
 
-        model_cache = self._model_cache.get_by_internal_id(
-            model.__class__, model._internal_id
-        )
-        if not model_cache:
+        if not self._model_cache.is_registered_by_id(model):
             raise RuntimeError(
                 f"Model with internal id {model._internal_id} not found on cache."
             )
-
-        return model_cache
 
     def _pre_update(self, model: ModelType, field: Field[T_co], value: T_co):
         self._check_frozen_field(model, field)
@@ -578,7 +569,7 @@ class Transaction:
         registered_models: Tuple[ModelType, ...] = tuple()
 
         for model in models:
-            if self._model_cache.has_model(model):
+            if self._model_cache.has_model_with_keys(model):
                 registered_model = await self.get(type(model), **model.primary_keys)
             else:
                 model._state = ModelStateMachine.transition(
@@ -669,11 +660,7 @@ class Transaction:
                 f" not valid because its state is either DISCARDED or UNBOUND."
             )
 
-        found_in_cache = bool(
-            self._model_cache.get_by_internal_id(model.__class__, model._internal_id)
-        )
-
-        if not found_in_cache:
+        if not self._model_cache.is_registered_by_id(model):
             raise ValueError(
                 f"Model of id `{model._internal_id}` ({model.__class__.__name__}) is"
                 f" not valid because it is not registered to the cache."

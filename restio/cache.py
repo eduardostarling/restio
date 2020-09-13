@@ -1,12 +1,10 @@
 from typing import Any, Dict, Optional, Set, Tuple, Type, TypeVar
-from uuid import UUID
 
 from restio.model import BaseModel, _check_model_type
 from restio.query import BaseQuery
 
 ModelType = TypeVar("ModelType", bound=BaseModel)
 
-IdCacheKey = Tuple[Type[ModelType], UUID]
 KeyCacheKey = Tuple[Type[ModelType], Tuple[Any, ...]]
 
 
@@ -15,7 +13,7 @@ class ModelCache:
     Stores BaseModel objects in dictionary with (type, hash) indexes.
     """
 
-    _id_cache: Dict[IdCacheKey, ModelType]
+    _id_cache: Set[ModelType]
     _key_cache: Dict[KeyCacheKey, ModelType]
 
     def __init__(self):
@@ -25,7 +23,7 @@ class ModelCache:
         """
         Resets the internal cache.
         """
-        self._id_cache = {}
+        self._id_cache = set()
         self._key_cache = {}
 
     def register(self, obj: ModelType, force: bool = False) -> bool:
@@ -37,22 +35,21 @@ class ModelCache:
                       cache. Defaults to False.
         :return: True if the model has been registered. False otherwise.
         """
-        obj_type, obj_pk, obj_hash = self._get_type_key_hash(obj)
-        cached, cached_model_id, cached_model_key = self._search_model(
-            obj, deep_search=force
-        )
+        in_id_cache: bool = self.is_registered_by_id(obj)
+        model_key: Optional[KeyCacheKey]
 
-        # now removes the existing models when forcing the operation
-        if cached and force:
-            self._remove_from_cache(cached_model_id, cached_model_key)
-            cached = None
+        if force:
+            model_key = self._search_key_for_model(obj, deep_search=True)
+            self._remove_from_cache(obj, model_key)
+            in_id_cache = False
+
+        model_key = self._get_type_key_hash(obj)
 
         # inserts the model if not in cache at this point
-        has_empty_pk = self._has_empty_pk(obj_pk)
-        if not cached:
-            self._id_cache[(obj_type, obj_hash)] = obj
-            if not has_empty_pk:
-                self._key_cache[(obj_type, obj_pk)] = obj
+        if not in_id_cache and (model_key not in self._key_cache or force):
+            self._id_cache.add(obj)
+            if not self._has_empty_pk(model_key):
+                self._key_cache[model_key] = obj
             return True
 
         return False
@@ -64,19 +61,16 @@ class ModelCache:
         :param obj: The model to be unregistered.
         :raises ValueError: When model is not found in cache.
         """
-        obj_type, _, obj_hash = self._get_type_key_hash(obj)
-        cached, cached_model_id, cached_model_key = self._search_model(
-            obj, deep_search=True
-        )
 
-        if not cached:
+        if not self.is_registered_by_id(obj):
             raise ValueError(
-                f"Object of type `{obj_type.__name__}` and id `{obj_hash}` not found"
-                " in cache."
+                f"Provided model `{obj._internal_id}` is not registered to the cache."
             )
 
+        cached_model_key = self._search_key_for_model(obj, deep_search=True)
+
         # now remove the cached models
-        self._remove_from_cache(cached_model_id, cached_model_key)
+        self._remove_from_cache(obj, cached_model_key)
 
     def has_model(self, model: ModelType) -> bool:
         """
@@ -85,12 +79,23 @@ class ModelCache:
         :param model: The model instance.
         :return: True if model exists in cache, False otherwise.
         """
-        model_type, keys, obj_hash = self._get_type_key_hash(model)
-        return (model_type, keys) in self._key_cache or obj_hash in self._id_cache
+        return self.is_registered_by_id(model)
 
-    def get_by_primary_key(
-        self, model_type: Type[ModelType], keys: Tuple[Any, ...]
-    ) -> Optional[ModelType]:
+    def has_model_with_keys(self, model: ModelType):
+        """
+        Indicates if a model is registered under the keys of the provided `model`.
+
+        :param model: The model instance.
+        :return: True if any model with the keys of `model` is found in the model
+                 cache, False otherwise.
+        """
+        key_hash = self._get_type_key_hash(model)
+        return self.has_keys(key_hash)
+
+    def has_keys(self, key_hash: KeyCacheKey) -> bool:
+        return not self._has_empty_pk(key_hash) and key_hash in self._key_cache
+
+    def get_by_primary_key(self, key_hash: KeyCacheKey) -> Optional[ModelType]:
         """
         Finds model in cache by its primary key.
 
@@ -98,19 +103,16 @@ class ModelCache:
         :param keys: The tuple of primary key that identify the model.
         :return: If found in cache, returns the model instance. Returns None otherwise.
         """
-        return self._key_cache.get((model_type, keys), None)
+        return self._key_cache.get(key_hash, None)
 
-    def get_by_internal_id(
-        self, model_type: Type[ModelType], internal_id: UUID
-    ) -> Optional[ModelType]:
+    def is_registered_by_id(self, obj: ModelType) -> bool:
         """
-        Finds model in cache by its internal id.
+        Indicates if the model `obj` is registered in the Id cache.
 
-        :param model_type: The model type to be retrieved.
-        :param internal_id: The unique internal id that identifies the model.
-        :return: If found in cache, returns the model instance. Returns None otherwise.
+        :param obj: The model.
+        :return: True if `obj` is in the Id cache, False otherwise.
         """
-        return self._id_cache.get((model_type, internal_id), None)
+        return obj in self._id_cache
 
     def get_all_models(self) -> Set[ModelType]:
         """
@@ -118,90 +120,48 @@ class ModelCache:
 
         :return: The set containing all models.
         """
-        return set(self._id_cache.values())
+        return set(self._id_cache.copy())
 
-    def _search_model(
+    def _search_key_for_model(
         self, obj: ModelType, deep_search: bool = True
-    ) -> Tuple[Optional[ModelType], Optional[IdCacheKey], Optional[KeyCacheKey]]:
+    ) -> Optional[KeyCacheKey]:
 
-        obj_type, obj_pk, obj_hash = self._get_type_key_hash(obj)
+        key_hash = self._get_type_key_hash(obj)
+        has_empty_pk = self._has_empty_pk(key_hash)
 
-        cached_model_id: Optional[IdCacheKey] = None
-        cached_model_key: Optional[KeyCacheKey] = None
-        cached: Optional[ModelType] = None
-        key_cached: Optional[ModelType] = None
+        # optimize by accessing the cache directly and checking if the model registered
+        # with the given key is the actual object we are looking for
+        if not has_empty_pk and self.get_by_primary_key(key_hash) == obj:
+            return key_hash
 
-        # first try to find the models by their keys
-        cached = self.get_by_internal_id(obj_type, obj_hash)
-        if cached:
-            cached_model_id = (obj_type, obj_hash)
+        # if not found, then try to find them directly by iterating over the stored
+        # models
+        return self._search_iterative(obj) if deep_search else None
 
-        # also try to find the model by its primary key
-        if not self._has_empty_pk(obj_pk):
-            key_cached = self.get_by_primary_key(obj_type, obj_pk)
-            cached = cached or key_cached
-
-            if key_cached:
-                cached_model_key = (obj_type, obj_pk)
-
-        # if not found, then try to find them directly by iterating over the
-        # stored models - do the same when found in id cache but not on key cache
-        if not cached or (deep_search and not key_cached):
-            skip_id = bool(cached) or not deep_search
-            cached, search_model_id, cached_model_key = self._search_iterative(
-                obj, skip_id_search=skip_id
-            )
-            if not skip_id:
-                cached_model_id = search_model_id
-
-        return cached, cached_model_id, cached_model_key
-
-    def _search_iterative(
-        self, obj: ModelType, skip_id_search: bool = False
-    ) -> Tuple[Optional[ModelType], Optional[IdCacheKey], Optional[KeyCacheKey]]:
-
-        cached_model: Optional[ModelType] = None
-        model_id: Optional[IdCacheKey] = None
+    def _search_iterative(self, obj: ModelType) -> Optional[KeyCacheKey]:
         model_key: Optional[KeyCacheKey] = None
-
-        if not skip_id_search:
-            for model_id, model in self._id_cache.items():
-                if model == obj:
-                    cached_model = model
-                    break
-            else:
-                model_id = None
 
         for model_key, model in self._key_cache.items():
             if model == obj:
-                cached_model = model
-                break
-        else:
-            model_key = None
+                return model_key
 
-        return cached_model, model_id, model_key
+        return None
 
-    def _get_type_key_hash(
-        self, obj: ModelType
-    ) -> Tuple[Type[ModelType], Tuple[Any, ...], UUID]:
+    def _get_type_key_hash(self, obj: ModelType) -> KeyCacheKey:
         _check_model_type(obj)
 
         obj_type = obj.__class__
         obj_pk = tuple(obj.primary_keys.values())
-        obj_hash = obj._internal_id
 
-        return obj_type, obj_pk, obj_hash
+        return obj_type, obj_pk
 
-    def _has_empty_pk(self, obj_pk: Tuple[Any, ...]):
-        return not obj_pk or None in obj_pk
+    def _has_empty_pk(self, obj_pk: Optional[KeyCacheKey]):
+        return not obj_pk or None in obj_pk[1]
 
     def _remove_from_cache(
-        self,
-        cached_model_id: Optional[IdCacheKey],
-        cached_model_key: Optional[KeyCacheKey],
+        self, obj: ModelType, cached_model_key: Optional[KeyCacheKey],
     ):
-        if cached_model_id and cached_model_id in self._id_cache:
-            del self._id_cache[cached_model_id]
+        self._id_cache.discard(obj)
         if cached_model_key and cached_model_key in self._key_cache:
             del self._key_cache[cached_model_key]
 

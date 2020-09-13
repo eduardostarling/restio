@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type
 from uuid import UUID, uuid4
 
 from restio.event import EventListener
@@ -174,9 +174,9 @@ class BaseModel(metaclass=BaseModelMeta):
     def get_children(
         self,
         recursive: bool = False,
-        children: Optional[List[BaseModel]] = None,
+        children: Optional[Set[BaseModel]] = None,
         top_level: Optional[BaseModel] = None,
-    ) -> List[BaseModel]:
+    ) -> Set[BaseModel]:
         """
         Returns the list of all children of the current model. This algorithm checks in
         runtime for all objects refered by the instance and that are part of fields
@@ -196,14 +196,13 @@ class BaseModel(metaclass=BaseModelMeta):
         """
 
         if children is None:
-            children = []
+            children = set()
 
         if top_level:
             if self == top_level:
                 return children
 
-            if self not in children:
-                children.append(self)
+            children.add(self)
         else:
             top_level = self
 
@@ -211,14 +210,13 @@ class BaseModel(metaclass=BaseModelMeta):
 
             def check(child: Optional[BaseModel]):
                 # this can happen when the field allows none
-                if not child:
+                if not child or child in children:  # type: ignore
                     return
 
-                if child not in children:  # type: ignore
-                    if recursive:
-                        child.get_children(recursive, children, top_level)
-                    else:
-                        children.append(child)
+                if recursive:
+                    child.get_children(recursive, children, top_level)
+                else:
+                    children.add(child)
 
             # iterables are only supported if the values are not iterables - there is
             # no recursiveness

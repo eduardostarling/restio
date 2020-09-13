@@ -4,7 +4,7 @@ import pytest
 
 from restio.transaction import Transaction, TransactionException
 from tests.integration.employee.client.api import ClientAPI
-from tests.integration.employee.client.daos import EmployeeDAO
+from tests.integration.employee.client.daos import CompanyDAO, EmployeeDAO
 from tests.integration.employee.client.models import Company, Employee
 from tests.integration.employee.fixture import CompanyEmployeeFixture
 
@@ -63,7 +63,11 @@ class TestIntegrationCompanyEmployee(CompanyEmployeeFixture):
 
     @pytest.mark.asyncio
     async def test_create_employee(
-        self, transaction: Transaction, api: ClientAPI, employee_dao: EmployeeDAO
+        self,
+        transaction: Transaction,
+        api: ClientAPI,
+        employee_dao: EmployeeDAO,
+        company_dao: CompanyDAO,
     ):
         new_employee = Employee(name="Chandler Bing", age=26, address="California")
         transaction.add(new_employee)
@@ -73,7 +77,7 @@ class TestIntegrationCompanyEmployee(CompanyEmployeeFixture):
 
         assert new_employee.key is not None
 
-        new_transaction = self._get_transaction(api, employee_dao)
+        new_transaction = self._get_transaction(api, employee_dao, company_dao)
         added_employee = await new_transaction.get(Employee, key=new_employee.key)
 
         assert added_employee.name == new_employee.name
@@ -110,7 +114,11 @@ class TestIntegrationCompanyEmployee(CompanyEmployeeFixture):
 
     @pytest.mark.asyncio
     async def test_update_employee_address(
-        self, transaction: Transaction, api: ClientAPI, employee_dao: EmployeeDAO
+        self,
+        transaction: Transaction,
+        api: ClientAPI,
+        employee_dao: EmployeeDAO,
+        company_dao: CompanyDAO,
     ):
         employee = await transaction.get(Employee, key=1000)
         assert employee.address != "Brazil"
@@ -118,7 +126,7 @@ class TestIntegrationCompanyEmployee(CompanyEmployeeFixture):
         employee.address = "Brazil"
         await transaction.commit()
 
-        new_transaction = self._get_transaction(api, employee_dao)
+        new_transaction = self._get_transaction(api, employee_dao, company_dao)
         updated_employee = await new_transaction.get(Employee, key=1000)
 
         assert updated_employee != employee
