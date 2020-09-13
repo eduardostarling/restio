@@ -43,6 +43,16 @@ class TestIntegrationCompanyEmployee(CompanyEmployeeFixture):
         assert company.employees
 
     @pytest.mark.asyncio
+    async def test_get_all_companies(
+        self, transaction: Transaction, company_dao: CompanyDAO
+    ):
+        q = company_dao.get_all_companies()
+        companies: Tuple[Company, ...] = await transaction.query(q)
+
+        assert len(companies) == 2
+        assert sum(len(c.employees) for c in companies) == 2
+
+    @pytest.mark.asyncio
     async def test_get_company_that_doesnt_exist(self, transaction: Transaction):
         with pytest.raises(ValueError):
             await transaction.get(Company, key="COMPANY_5555")
