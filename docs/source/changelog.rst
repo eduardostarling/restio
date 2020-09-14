@@ -1,19 +1,24 @@
 Changelog
 =========
 
+1.0.0b3
+-------
+
+- Added support for Field Setters with the :code:`Field.setter` decorator in models.
+- Added support for the built-in python :code:`@property` in models.
+- Improved performance when registering objects to the transaction cache. Registering a new object to a transaction that already contains many models registered will now be faster. Also, applies when queries retrieve multiple objects at once.
+- **BREAKING CHANGE**: :code:`BaseModel.get_children()` now returns a :code:`Set` instead of a :code:`List`. This also applies to the input argument :code:`children`.
+
+
 1.0.0b2
 -------
 
 - Fixed bug that failed to properly check trees of models with deleted state.
 - Fixed bug that would maintain an incorrect persistent state of models when a model was unbound from a transaction.
-- Added support for Field Setters with the :code:`Field.setter` decorator in models.
-- Added support for the built-in python :code:`@property` in models.
 - Added restriction in which it is not possible anymore to register a model after it has been discarded. Also, during a :code:`Transaction.reset()` all models are now marked as discarded.
 - Added check that rejects model attribute updates when the provided values depend on models that are not yet in the transaction cache.
 - Added a static method :code:`Transaction.raise_for_status(tasks)` that raises a :code:`TransactionException` with all the :code:`tasks` that failed and all that succeeded during a :code:`Transaction.commit()`.
 - **BREAKING CHANGE**: Changed the behavior of :code:`Transaction.commit()` to automatically call :code:`Transaction.raise_for_status()` whenever :code:`raise_for_status=True` (default).
-- Improved performance when registering objects to the transaction cache. Registering a new object to a transaction that already contains many models registered will now be faster. Also, applies when queries retrieve multiple objects at once.
-- **BREAKING CHANGE**: :code:`BaseModel.get_children()` now returns a :code:`Set` instead of a :code:`List`. This also applies to the input argument :code:`children`.
 
 
 1.0.0b1
