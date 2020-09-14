@@ -95,6 +95,13 @@ class TestIntegrationCompanyEmployee(CompanyEmployeeFixture):
         assert added_employee.address == new_employee.address
 
     @pytest.mark.asyncio
+    async def test_create_young_employee(
+        self, transaction: Transaction,
+    ):
+        with pytest.raises(ValueError, match="younger than 18"):
+            Employee(name="Young Employee", age=15, address="California")
+
+    @pytest.mark.asyncio
     async def test_create_and_hire_employee(self, transaction: Transaction):
         new_employee = Employee(name="Chandler Bing", age=26, address="California")
         company = await transaction.get(Company, key="COMPANY_B")

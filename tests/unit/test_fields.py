@@ -211,3 +211,123 @@ class TestFields:
         obj = Model()
 
         assert obj.field == expected_value
+
+    _setter_params = [
+        (IntField, 1, 2),
+        (StrField, "a", "b"),
+        (BoolField, False, True),
+        (lambda **kwargs: TupleField(int, **kwargs), (1,), (2,)),
+        (
+            lambda **kwargs: FrozenSetField(str, **kwargs),
+            frozenset({"a"}),
+            frozenset({"b"}),
+        ),
+        (lambda **kwargs: ModelField(FieldsModel, **kwargs), None, default_model),
+        (
+            lambda **kwargs: TupleModelField(FieldsModel, **kwargs),
+            tuple(),
+            (default_model,),
+        ),
+        (
+            lambda **kwargs: FrozenSetModelField(FieldsModel, **kwargs),
+            frozenset(),
+            frozenset({default_model}),
+        ),
+    ]
+
+    @pytest.mark.parametrize("field_type, input_value, setter_value", _setter_params)
+    @pytest.mark.parametrize(
+        "setter_type", ["constructor", "decorator", "method_decorator"]
+    )
+    def test_setter_field_assignment(
+        self, setter_type, field_type, input_value, setter_value
+    ):
+        initialized = False
+        model_class = None
+
+        def setter(model, value):
+            assert isinstance(model, BaseModel)
+
+            if initialized:
+                assert value == input_value
+                return setter_value
+            else:
+                return value
+
+        if setter_type == "constructor":
+
+            class ModelConstructor(BaseModel):
+                field = field_type(setter=setter)
+
+            model_class = ModelConstructor
+
+        elif setter_type == "decorator":
+
+            class ModelDecorator(BaseModel):
+                field = field_type()
+
+                @field.setter
+                def field_setter(self, value):
+                    return setter(self, value)
+
+            model_class = ModelDecorator
+
+        elif setter_type == "method_decorator":
+
+            class ModelMethodDecorator(BaseModel):
+                field = field_type()
+                field_setter = field.setter(setter)
+
+            model_class = ModelMethodDecorator
+
+        if not model_class:
+            pytest.fail("Setter type has not been properly defined")
+
+        obj = model_class()
+        initialized = True
+        assert obj.field != setter_value
+        obj.field = input_value
+        assert obj.field == setter_value
+
+    def test_setter_exception(self):
+        class Model(BaseModel):
+            field = IntField(default=20)
+
+            @field.setter
+            def field_setter(self, value: int):
+                if value < 18:
+                    raise ValueError()
+                return value
+
+        obj = Model()
+
+        assert obj.field == 20
+
+        with pytest.raises(ValueError):
+            obj.field = 5
+
+        assert obj.field == 20
+
+    def test_property_setter(self):
+        class Model(BaseModel):
+            _field = IntField(default=15)
+
+            @property
+            def field(self):
+                return self._field
+
+            @field.setter
+            def field(self, value: int):
+                if value < 18:
+                    raise ValueError()
+                self._field = value
+
+        obj = Model()
+
+        assert obj.field == 15
+        assert obj._field == 15
+
+        obj.field = 20
+
+        assert obj.field == 20
+        assert obj._field == 20

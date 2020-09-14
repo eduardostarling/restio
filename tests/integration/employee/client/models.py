@@ -13,6 +13,12 @@ class Employee(BaseModel):
         self.age = age
         self.address = address
 
+    @age.setter
+    def _validate_age(self, age: int) -> int:
+        if age < 18:
+            raise ValueError("Cannot have employees younger than 18.")
+        return age
+
 
 class Company(BaseModel):
     key: StrField = StrField(pk=True, frozen=FrozenType.ALWAYS)

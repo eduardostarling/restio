@@ -6,6 +6,8 @@ Changelog
 
 - Fixed bug that failed to properly check trees of models with deleted state.
 - Fixed bug that would maintain an incorrect persistent state of models when a model was unbound from a transaction.
+- Added support for Field Setters with the :code:`Field.setter` decorator in models.
+- Added support for the built-in python :code:`@property` in models.
 - Added restriction in which it is not possible anymore to register a model after it has been discarded. Also, during a :code:`Transaction.reset()` all models are now marked as discarded.
 - Added check that rejects model attribute updates when the provided values depend on models that are not yet in the transaction cache.
 - Added a static method :code:`Transaction.raise_for_status(tasks)` that raises a :code:`TransactionException` with all the :code:`tasks` that failed and all that succeeded during a :code:`Transaction.commit()`.
