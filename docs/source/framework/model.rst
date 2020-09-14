@@ -29,13 +29,13 @@ For example, a model :code:`Employee` could be written using as following to rep
         ) -> None:
             self.name = name
             self.age = age or self.age  # uses default
+            self.address = address or self.address  # uses default
 
-            self.change_address(address or self.address)  # uses default
-
-        def change_address(self, new_address: str):
-            if not new_address:
+        @address.setter
+        def _validate_address(self, address: str):
+            if not address:
                 raise ValueError("Invalid address.")
-            self.address = new_address
+            return address
 
 
 All **restio** models should inherit from :code:`restio.model.BaseModel`, and all fields should be of type :code:`restio.fields.Field`. :code:`BaseModel` will guarante that the models can be properly operated by the other **restio** modules, such as Transactions and Data Access Objects.
@@ -62,7 +62,7 @@ All model attributes should be declared as fields. Fields tell **restio** how to
 Default values
 ^^^^^^^^^^^^^^
 
-Field's default values are assigned to the model instance as soon as they are accessed for the first time, or right after the constructor returns.
+Fields' default values are assigned to the model instance as soon as they are accessed for the first time, or right after the constructor returns.
 
 Every Field subtype should have its own default value, which can be configured by either using the keyword :code:`default` or :code:`default_factory`. :code:`default` accepts a static value, while :code:`default_factory` accepts callables.
 
@@ -149,6 +149,86 @@ Example:
     model_constructed.weight                           # 70
 
     model_constructed = Model(id_=1, weight=70)        # error
+
+
+Setters and Properties
+^^^^^^^^^^^^^^^^^^^^^^
+
+All fields support custom assignment validation by either using the field decorator :code:`Field.setter` or by creating a custom property directly in the model.
+
+**Setters**
+
+The :code:`setter` decorator is more convenient because it doesn't require creating a custom :code:`getter`. For example, if you wish to validate that all :code:`Employees` are 18 or older at all times, this can be done as following:
+
+.. code-block:: python
+
+    from restio.model import BaseModel
+    from restio.fields import StrField, IntField
+
+    class Employee(BaseModel):
+        name: StrField = StrField()
+        age: IntField = IntField()
+
+        @age.setter
+        def _validate_age(self, age: int) -> int:
+            if age < 18:
+                raise ValueError(f"Employee {self.name} should be 18 or older.")
+            return age
+
+
+Or, if the validation function lives elsewhere, it is also possible to define it in the constructor of the field:
+
+.. code-block:: python
+
+    from restio.model import BaseModel
+    from restio.fields import StrField, IntField
+
+    def _validate_age(model: Employee, age: int) -> int:
+        if age < 18:
+            raise ValueError(f"Employee {model.name} should be 18 or older.")
+        return age
+
+    class Employee(BaseModel):
+        name: StrField = StrField()
+        age: IntField = IntField(setter=_validate_age)
+
+
+The value returned by the :code:`setter` is ultimately the value assigned to the field, therefore you should always return the final value to be assigned. For validation only, that is normally the input value (as seen above).
+
+Please keep in mind that:
+
+- The type-checking is always done before the setter is called, and **there is no type-checking** for the value returned by the :code:`setter`.
+- Default values are also checked by the :code:`setter`.
+
+**Properties**
+
+If you wish an even more customized behavior, Models and Fields will support the built-in python decorator :code:`@property`. Let's say that, in the last example, there might be some :code:`Employees` that were forcefully registered in the remote data store with an age of 16 by a database administrator, but the restriction of hiring Employees older than 18 through the API still applies. In that case, we should be able to bypass the data assignment for the very young Employees:
+
+.. code-block:: python
+
+    from restio.model import BaseModel
+    from restio.fields import StrField, IntField
+
+    class Employee(BaseModel):
+        name: StrField = StrField()
+        _age: IntField = IntField()
+
+        @property
+        def age(self) -> int:
+            return self._age
+
+        @age.setter
+        def age(self, value: int):
+            if value < 18:
+                raise ValueError(f"Employee {self.name} should be 18 or older.")
+            self._age = value
+
+    employee = Employee()
+    employee.name = "John"
+
+    employee.age = 15   # fails
+    employee._age = 15  # succeeds
+
 
 .. _primary_keys:
 
@@ -319,21 +399,17 @@ We can extend the example on the top of this page by implementing and extra `Com
         address: StrField = StrField(default="Company Address")
 
         def __init__(
-            self,
-            *,
-            name: str,
-            age: Optional[int] = None,
-            address: Optional[str] = None,
+            self, *, name: str, age: Optional[int] = None, address: Optional[str] = None,
         ) -> None:
             self.name = name
             self.age = age or self.age  # uses default
+            self.address = address or self.address  # uses default
 
-            self.change_address(address or self.address)  # uses default
-
-        def change_address(self, new_address: str):
-            if not new_address:
+        @address.setter
+        def _validate_address(self, address: str) -> str:
+            if not address:
                 raise ValueError("Invalid address.")
-            self.address = new_address
+            return address
 
 
     class Company(BaseModel):
@@ -342,24 +418,30 @@ We can extend the example on the top of this page by implementing and extra `Com
 
         def __init__(self, name: str, employees: FrozenSet[Employee]):
             self.name = name
-
-            for employee in employees:
-                self.hire_employee(employee)
+            self.employees = employees
 
         def hire_employee(self, employee: Employee):
-            # frozensets are immutable, therefore we need to re-set the value
-            # back to the model
-            if not employee.age >= 18:
-                raise ValueError(f"The employee {employee.name} is not 18 yet.")
-
+            # frozensets are immutable, therefore we need to re-set the value back to the
+            # model
             self.employees = frozenset(self.employees.union({employee}))
+
+        @employees.setter
+        def _validate_employee(self, employees: FrozenSet[Employee]) -> FrozenSet[Employee]:
+            for employee in employees:
+                if not employee.age >= 18:
+                    raise ValueError(f"The employee {employee.name} is not 18 yet.")
+
+            return employees
 
 
     # it is now easy to manipulate objects in the application
     employee_a = Employee(name="Alice", age=27)
     employee_b = Employee(name="Bob", age=19)
 
-    company = Company(name="Awesome Company", employees=frozenset({employee_a}))  # this works
+    company = Company(
+        name="Awesome Company", employees=frozenset({employee_a})
+    )  # this works
 
     employee_c = Employee(name="Junior", age=16)
     company.hire_employee(employee_c)  # this fails
+

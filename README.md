@@ -96,13 +96,13 @@ class Employee(BaseModel):
     ) -> None:
         self.name = name
         self.age = age or self.age  # uses default
+        self.address = address or self.address  # uses default
 
-        self.change_address(address or self.address)  # uses default
-
-    def change_address(self, new_address: str):
-        if not new_address:
+    @address.setter
+    def _validate_address(self, address: str):
+        if not address:
             raise ValueError("Invalid address.")
-        self.address = new_address
+        return address
 
 
 # Data access object definition - teaches restio how to deal with

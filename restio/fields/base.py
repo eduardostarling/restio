@@ -1,3 +1,4 @@
+import inspect
 from enum import Flag, auto
 from typing import TYPE_CHECKING, Callable, Generic, Optional, Type, TypeVar, Union
 
@@ -5,6 +6,7 @@ if TYPE_CHECKING:
     from restio.model import BaseModel
 
 
+Model_co = TypeVar("Model_co", bound="BaseModel", covariant=True)
 T_co = TypeVar("T_co", bound=object, covariant=True)
 SubT = TypeVar("SubT")
 
@@ -39,6 +41,8 @@ class FrozenType(Flag):
     ALWAYS = UPDATE | CREATE  # type: ignore
 
 
+SetterType = Callable[[Model_co, T_co], T_co]
+
 # Base fields
 
 
@@ -51,6 +55,7 @@ class Field(Generic[T_co], object):
     allow_none: bool
     depends_on: bool
     frozen: FrozenType
+    _setter: Optional[SetterType]
 
     def __init__(
         self,
@@ -62,6 +67,7 @@ class Field(Generic[T_co], object):
         frozen: FrozenType,
         default: Union[Optional[T_co], Type[MISSING]] = MISSING,
         default_factory: Union[Optional[Callable[[], T_co]], Type[MISSING]] = MISSING,
+        setter: Optional[SetterType] = None,
     ):
         if default is MISSING and default_factory is MISSING:
             if allow_none:
@@ -80,6 +86,7 @@ class Field(Generic[T_co], object):
         self.allow_none = allow_none
         self.depends_on = depends_on
         self.frozen = frozen
+        self.setter(setter)
 
     def __set_name__(self, owner, name: str):
         self.name = name
@@ -88,7 +95,7 @@ class Field(Generic[T_co], object):
         if instance._initialized:
             instance._pre_update(self, value)
 
-        self._check_value(instance, value)
+        value = self._check_value(instance, value)
 
         if instance._initialized:
             instance._update(self, value)
@@ -108,14 +115,14 @@ class Field(Generic[T_co], object):
 
     def _store_default(self, instance: "BaseModel", force=False):
         if self.name not in instance.__dict__ or force:
-            default = self.default
-            self._check_value(instance, default)
+            default = self._check_value(instance, self.default)
             instance.__dict__[self.name] = default
 
-    def _check_value(self, instance: "BaseModel", value: T_co):
+    def _check_value(self, instance: "BaseModel", value: T_co) -> T_co:
         _check_field_value_type(
             self.type_, self._field_name(instance), value, allow_none=self.allow_none
         )
+        return self._setter(instance, value) if self._setter is not None else value
 
     @property
     def default(self) -> T_co:
@@ -127,6 +134,17 @@ class Field(Generic[T_co], object):
             if self._default_factory is not MISSING
             else self._default
         )
+
+    def setter(self: "Field[T_co]", method: Optional[SetterType]):
+        if method is not None:
+            signature = inspect.signature(method).parameters
+            if len(signature) != 2:
+                raise ValueError(
+                    f"The provided setter {method.__name__} should accept exactly 2"
+                    " parameters."
+                )
+        self._setter = method
+        return method
 
     def _field_name(self, instance: "BaseModel") -> str:
         return f"{instance.__class__.__name__}.{self.name}"
@@ -146,6 +164,7 @@ class ContainerField(Field[T_co]):
         frozen: FrozenType,
         default: Union[Optional[T_co], Type[MISSING]] = MISSING,
         default_factory: Union[Optional[Callable[[], T_co]], Type[MISSING]] = MISSING,
+        setter: Optional[SetterType] = None,
     ) -> None:
         super().__init__(
             type_=type_,
@@ -155,6 +174,7 @@ class ContainerField(Field[T_co]):
             allow_none=allow_none,
             depends_on=depends_on,
             frozen=frozen,
+            setter=setter,
         )
         self.sub_type = sub_type
 
@@ -173,6 +193,7 @@ class IterableField(ContainerField[T_co]):
         frozen: FrozenType,
         default: Union[Optional[T_co], Type[MISSING]] = MISSING,
         default_factory: Union[Optional[Callable[[], T_co]], Type[MISSING]] = MISSING,
+        setter: Optional[SetterType] = None,
     ) -> None:
         super().__init__(
             type_=type_,
@@ -183,9 +204,11 @@ class IterableField(ContainerField[T_co]):
             allow_none=allow_none,
             depends_on=depends_on,
             frozen=frozen,
+            setter=setter,
         )
 
     def _check_value(self, instance: "BaseModel", value: SubT):
-        super()._check_value(instance, value)
+        value = super()._check_value(instance, value)
         for item in value:
             super()._check_sub_value(item)
+        return value

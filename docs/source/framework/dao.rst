@@ -63,13 +63,13 @@ We can now use a **DAO** to persist the model :code:`Employee` using the :code:`
         ) -> None:
             self.name = name
             self.age = age or self.age  # uses default
+            self.address = address or self.address  # uses default
 
-            self.change_address(address or self.address)  # uses default
-
-        def change_address(self, new_address: str):
-            if not new_address:
+        @address.setter
+        def _validate_address(self, address: str):
+            if not address:
                 raise ValueError("Invalid address.")
-            self.address = new_address
+            return address
 
 
     class EmployeeDAO(BaseDAO[Employee]):
@@ -184,13 +184,13 @@ A complete implementation of the :code:`EmployeeDAO` and :code:`ClientAPI` for a
         ) -> None:
             self.name = name
             self.age = age or self.age  # uses default
+            self.address = address or self.address  # uses default
 
-            self.change_address(address or self.address)  # uses default
-
-        def change_address(self, new_address: str):
-            if not new_address:
+        @address.setter
+        def _validate_address(self, address: str):
+            if not address:
                 raise ValueError("Invalid address.")
-            self.address = new_address
+            return address
 
 
     class EmployeeDAO(BaseDAO[Employee]):
