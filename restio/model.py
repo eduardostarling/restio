@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Any, Callable, Dict, Optional, Set, Tuple, Type
+from reprlib import Repr
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type
 from uuid import UUID, uuid4
 
 from restio.event import EventListener
@@ -15,16 +16,18 @@ def _check_model_type(obj: Optional[BaseModel]):
 
 
 class ModelMeta:
-    __slots__ = ("init", "init_ignore_extra", "fields", "primary_keys")
+    __slots__ = ("init", "init_ignore_extra", "repr", "fields", "primary_keys")
 
     init: bool
     init_ignore_extra: bool
+    repr: bool
     fields: Dict[str, Field]
     primary_keys: Dict[str, Field]
 
     def __init__(self):
         self.init = True
         self.init_ignore_extra = True
+        self.repr = True
         self.fields = dict()
         self.primary_keys = dict()
 
@@ -110,6 +113,9 @@ class BaseModelMeta(type):
 
 MODEL_PRE_UPDATE_EVENT = "__pre_update__"
 MODEL_UPDATE_EVENT = "__updated__"
+
+_repr_obj: Repr = Repr()
+_repr_obj.maxother = 200
 
 
 class BaseModel(metaclass=BaseModelMeta):
@@ -375,6 +381,19 @@ class BaseModel(metaclass=BaseModelMeta):
 
     def __eq__(self, other: BaseModel) -> bool:
         return isinstance(other, self.__class__) and self._hash == other._hash
+
+    def __repr__(self) -> str:
+        if not self._meta.repr:
+            return super().__repr__()
+
+        def get_field_repr(field: str):
+            value = getattr(self, field)
+            return f"{field}={_repr_obj.repr(value)}"
+
+        repr_args: List[str] = [
+            get_field_repr(n) for n in self._filter_fields(lambda x: x.repr)
+        ]
+        return f"{self.__class__.__name__}({', '.join(repr_args)})"
 
     def __hash__(self) -> int:
         return self._hash

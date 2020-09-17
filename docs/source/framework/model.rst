@@ -453,7 +453,9 @@ All model classes contain an internal structure :code:`ModelMeta`, which defines
 
     class Model(BaseModel):
         class Meta:
-            pass
+            init = True
+            init_ignore_extra = True
+            repr = True
 
         ...
 
@@ -463,6 +465,7 @@ Currently, the following attributes can be provided to :code:`Meta`:
 
 - :code:`init` (:code:`bool`, defaults to :code:`True`): Indicates if the default base constructor behavior will be active. When :code:`True`, parameters given to the constructor will be assigned to fields that match their names. When :code:`False`, this assignment is skipped.
 - :code:`init_ignore_extra` (:code:`bool`, defaults to :code:`True`): Indicates if extra parameters given to the constructor will be ignored. When not ignored, any extra parameter passed to :code:`BaseModel.__init__` raises an Exception.
+- :code:`repr` (:code:`bool`, defaults to :code:`True`): Enables the generation of :code:`repr` strings on :code:`BaseModel.__repr__`. When :code:`True`, all fields marked with :code:`repr=True` (also the default) will be included on the output of :code:`__repr__`. When :code:`False`, the default Python :code:`__repr__` is used.
 
 
 Example using relational models
