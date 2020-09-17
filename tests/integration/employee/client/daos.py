@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Callable, FrozenSet, List
+from typing import Any, Callable, FrozenSet, List, Tuple
 
 from restio.dao import BaseDAO
 from restio.query import query
@@ -80,9 +80,10 @@ class CompanyDAO(BaseDAO[Company]):
 
     async def _load_company_employees(self, key: str) -> FrozenSet[Employee]:
         company_employees_query = self.get_company_employees(company_key=key)
-        return frozenset(
-            await self.transaction.query(company_employees_query, force=True)
+        employees: Tuple[Employee, ...] = await self.transaction.query(
+            company_employees_query, force=True
         )
+        return frozenset(employees)
 
     @query
     async def get_company_employees(self, company_key: str) -> FrozenSet[Employee]:

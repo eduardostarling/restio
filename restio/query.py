@@ -21,13 +21,12 @@ if TYPE_CHECKING:
     from restio.transaction import Transaction
 
 
-ModelType = TypeVar("ModelType", bound=BaseModel, covariant=True)
-FunctionType = Callable[..., Awaitable[Iterable[ModelType]]]
+Model_co = TypeVar("Model_co", bound=BaseModel, covariant=True)
 
 TRANSACTION_KEYWORD = "transaction"
 
 
-class BaseQuery(Generic[ModelType]):
+class BaseQuery(Generic[Model_co]):
     """
     Defines a query object to be processed by a Transaction.
 
@@ -47,7 +46,7 @@ class BaseQuery(Generic[ModelType]):
     __has_transaction_argument: bool
 
     def __init__(
-        self, function: FunctionType, *args, **kwargs,
+        self, function: Callable[..., Awaitable[Iterable[Model_co]]], *args, **kwargs,
     ):
         self.__function = function
         self.__args = args or tuple()
@@ -92,7 +91,7 @@ class BaseQuery(Generic[ModelType]):
         self.__transaction = transaction
         return self
 
-    def __await__(self) -> Generator[Any, Iterable[ModelType], Iterable[ModelType]]:
+    def __await__(self) -> Generator[Any, Iterable[Model_co], Iterable[Model_co]]:
         kwargs = self.__kwargs
 
         if self.__has_transaction_argument:
@@ -110,7 +109,9 @@ class BaseQuery(Generic[ModelType]):
         return (yield from self.__function(*self.__args, **kwargs).__await__())
 
 
-def query(function: FunctionType) -> Callable[..., BaseQuery[ModelType]]:
+def query(
+    function: Callable[..., Awaitable[Iterable[Model_co]]]
+) -> Callable[..., BaseQuery[Model_co]]:
     f"""
     Query decorator.
 
@@ -126,7 +127,7 @@ def query(function: FunctionType) -> Callable[..., BaseQuery[ModelType]]:
     """
 
     @wraps(function)
-    def wrapper(*args, **kwargs) -> BaseQuery[ModelType]:
+    def wrapper(*args, **kwargs) -> BaseQuery[Model_co]:
         return BaseQuery(function, *args, **kwargs)
 
     return wrapper

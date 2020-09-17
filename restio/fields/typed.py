@@ -1,10 +1,11 @@
-from typing import Callable, FrozenSet, Optional, Tuple, Type, TypeVar, Union
+from typing import Callable, FrozenSet, Optional, Tuple, Type, Union
 
 from restio.fields.base import (
     MISSING,
     Field,
     FrozenType,
     IterableField,
+    Model_co,
     SetterType,
     SubT,
 )
@@ -85,7 +86,7 @@ class BoolField(Field[bool]):
         )
 
 
-class TupleField(IterableField[Tuple[SubT, ...]]):
+class TupleField(IterableField[Tuple[SubT, ...], SubT]):
     def __init__(
         self,
         sub_type: Type[SubT],
@@ -112,7 +113,7 @@ class TupleField(IterableField[Tuple[SubT, ...]]):
         )
 
 
-class FrozenSetField(IterableField[FrozenSet[SubT]]):
+class FrozenSetField(IterableField[FrozenSet[SubT], SubT]):
     def __init__(
         self,
         sub_type: Type[SubT],
@@ -139,18 +140,15 @@ class FrozenSetField(IterableField[FrozenSet[SubT]]):
         )
 
 
-ModelType = TypeVar("ModelType", covariant=True)
-
-
-class ModelField(Field[ModelType]):
+class ModelField(Field[Model_co]):
     def __init__(
         self,
-        model_type: Type[ModelType],
+        model_type: Type[Model_co],
         *,
         init: bool = True,
-        default: Union[Optional[ModelType], Type[MISSING]] = MISSING,
+        default: Union[Optional[Model_co], Type[MISSING]] = MISSING,
         default_factory: Union[
-            Optional[Callable[[], ModelType]], Type[MISSING]
+            Optional[Callable[[], Model_co]], Type[MISSING]
         ] = MISSING,
         allow_none: bool = True,
         depends_on: bool = True,
@@ -170,15 +168,15 @@ class ModelField(Field[ModelType]):
         )
 
 
-class TupleModelField(TupleField[ModelType]):
+class TupleModelField(TupleField[Model_co]):
     def __init__(
         self,
-        model_type: Type[ModelType],
+        model_type: Type[Model_co],
         *,
         init: bool = True,
-        default: Union[Tuple[ModelType, ...], Type[MISSING]] = MISSING,
+        default: Union[Tuple[Model_co, ...], Type[MISSING]] = MISSING,
         default_factory: Union[
-            Optional[Callable[[], Tuple[ModelType, ...]]], Type[MISSING]
+            Optional[Callable[[], Tuple[Model_co, ...]]], Type[MISSING]
         ] = MISSING,
         depends_on: bool = True,
         frozen: FrozenType = FrozenType.NEVER,
@@ -195,15 +193,15 @@ class TupleModelField(TupleField[ModelType]):
         )
 
 
-class FrozenSetModelField(FrozenSetField[ModelType]):
+class FrozenSetModelField(FrozenSetField[Model_co]):
     def __init__(
         self,
-        model_type: Type[ModelType],
+        model_type: Type[Model_co],
         *,
         init: bool = True,
-        default: Union[Optional[FrozenSet[ModelType]], Type[MISSING]] = MISSING,
+        default: Union[Optional[FrozenSet[Model_co]], Type[MISSING]] = MISSING,
         default_factory: Union[
-            Optional[Callable[[], FrozenSet[ModelType]]], Type[MISSING]
+            Optional[Callable[[], FrozenSet[Model_co]]], Type[MISSING]
         ] = MISSING,
         depends_on: bool = True,
         frozen: FrozenType = FrozenType.NEVER,

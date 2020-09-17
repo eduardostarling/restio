@@ -1,6 +1,6 @@
 import asyncio
 import json
-from typing import Any, Callable, Dict, FrozenSet, List
+from typing import Any, Callable, Dict, FrozenSet, List, Tuple
 
 import aiohttp
 
@@ -168,7 +168,7 @@ class CompanyDAO(BaseDAO[Company]):
         # register all the loaded employees to the cache - the `force` argument
         # is used to tell the transaction to execute the query again, without
         # replacing the models that are already in the cache
-        company_employees = await self.transaction.query(
+        company_employees: Tuple[Employee, ...] = await self.transaction.query(
             company_employees_query, force=True
         )
 

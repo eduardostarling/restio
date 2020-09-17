@@ -3,9 +3,9 @@ from typing import Any, Dict, Optional, Set, Tuple, Type, TypeVar
 from restio.model import BaseModel, _check_model_type
 from restio.query import BaseQuery
 
-ModelType = TypeVar("ModelType", bound=BaseModel)
+Model_co = TypeVar("Model_co", bound=BaseModel, covariant=True)
 
-KeyCacheKey = Tuple[Type[ModelType], Tuple[Any, ...]]
+KeyCacheKey = Tuple[Type[Model_co], Tuple[Any, ...]]
 
 
 class ModelCache:
@@ -13,8 +13,8 @@ class ModelCache:
     Stores BaseModel objects in dictionary with (type, hash) indexes.
     """
 
-    _id_cache: Set[ModelType]
-    _key_cache: Dict[KeyCacheKey, ModelType]
+    _id_cache: Set[BaseModel]
+    _key_cache: Dict[KeyCacheKey, BaseModel]
 
     def __init__(self):
         self.reset()
@@ -26,7 +26,7 @@ class ModelCache:
         self._id_cache = set()
         self._key_cache = {}
 
-    def register(self, obj: ModelType, force: bool = False) -> bool:
+    def register(self, obj: BaseModel, force: bool = False) -> bool:
         """
         Registers a model into the internal cache.
 
@@ -54,7 +54,7 @@ class ModelCache:
 
         return False
 
-    def unregister(self, obj: ModelType):
+    def unregister(self, obj: BaseModel):
         """
         Unregisters a model from cache.
 
@@ -72,7 +72,7 @@ class ModelCache:
         # now remove the cached models
         self._remove_from_cache(obj, cached_model_key)
 
-    def has_model(self, model: ModelType) -> bool:
+    def has_model(self, model: BaseModel) -> bool:
         """
         Indicates if model exists in cache.
 
@@ -81,7 +81,7 @@ class ModelCache:
         """
         return self.is_registered_by_id(model)
 
-    def has_model_with_keys(self, model: ModelType):
+    def has_model_with_keys(self, model: BaseModel):
         """
         Indicates if a model is registered under the keys of the provided `model`.
 
@@ -95,7 +95,7 @@ class ModelCache:
     def has_keys(self, key_hash: KeyCacheKey) -> bool:
         return not self._has_empty_pk(key_hash) and key_hash in self._key_cache
 
-    def get_by_primary_key(self, key_hash: KeyCacheKey) -> Optional[ModelType]:
+    def get_by_primary_key(self, key_hash: KeyCacheKey) -> Optional[BaseModel]:
         """
         Finds model in cache by its primary key.
 
@@ -104,7 +104,7 @@ class ModelCache:
         """
         return self._key_cache.get(key_hash, None)
 
-    def is_registered_by_id(self, obj: ModelType) -> bool:
+    def is_registered_by_id(self, obj: BaseModel) -> bool:
         """
         Indicates if the model `obj` is registered in the Id cache.
 
@@ -113,7 +113,7 @@ class ModelCache:
         """
         return obj in self._id_cache
 
-    def get_all_models(self) -> Set[ModelType]:
+    def get_all_models(self) -> Set[BaseModel]:
         """
         Returns a set of all models in cache.
 
@@ -122,7 +122,7 @@ class ModelCache:
         return set(self._id_cache.copy())
 
     def _search_key_for_model(
-        self, obj: ModelType, deep_search: bool = True
+        self, obj: BaseModel, deep_search: bool = True
     ) -> Optional[KeyCacheKey]:
 
         key_hash = self._get_type_key_hash(obj)
@@ -137,7 +137,7 @@ class ModelCache:
         # models
         return self._search_iterative(obj) if deep_search else None
 
-    def _search_iterative(self, obj: ModelType) -> Optional[KeyCacheKey]:
+    def _search_iterative(self, obj: BaseModel) -> Optional[KeyCacheKey]:
         model_key: Optional[KeyCacheKey] = None
 
         for model_key, model in self._key_cache.items():
@@ -146,7 +146,7 @@ class ModelCache:
 
         return None
 
-    def _get_type_key_hash(self, obj: ModelType) -> KeyCacheKey:
+    def _get_type_key_hash(self, obj: BaseModel) -> KeyCacheKey:
         _check_model_type(obj)
 
         obj_type = obj.__class__
@@ -158,7 +158,7 @@ class ModelCache:
         return not obj_pk or None in obj_pk[1]
 
     def _remove_from_cache(
-        self, obj: ModelType, cached_model_key: Optional[KeyCacheKey],
+        self, obj: BaseModel, cached_model_key: Optional[KeyCacheKey],
     ):
         self._id_cache.discard(obj)
         if cached_model_key and cached_model_key in self._key_cache:
@@ -170,7 +170,7 @@ class QueryCache:
     Stores query results based on Query hash.
     """
 
-    _cache: Dict[int, Tuple[ModelType, ...]]
+    _cache: Dict[int, Tuple[BaseModel, ...]]
 
     def __init__(self):
         self.reset()
@@ -183,8 +183,8 @@ class QueryCache:
 
     def register(
         self,
-        query: BaseQuery[ModelType],
-        results: Tuple[ModelType, ...],
+        query: BaseQuery[Model_co],
+        results: Tuple[Model_co, ...],
         force: bool = False,
     ) -> bool:
         """
@@ -203,7 +203,7 @@ class QueryCache:
 
         return not cached
 
-    def get(self, query: BaseQuery[ModelType]) -> Optional[Tuple[ModelType, ...]]:
+    def get(self, query: BaseQuery[Model_co]) -> Optional[Tuple[Model_co, ...]]:
         """
         Returns results stored in cache for a particular query.
 

@@ -159,7 +159,7 @@ class Field(Generic[T_co], object):
         return f"{instance.__class__.__name__}.{self.name}"
 
 
-class ContainerField(Field[T_co]):
+class ContainerField(Field[T_co], Generic[T_co, SubT]):
     sub_type: Type[SubT]
 
     def __init__(
@@ -193,7 +193,7 @@ class ContainerField(Field[T_co]):
         _check_field_value_type(self.sub_type, self.name, sub_value)
 
 
-class IterableField(ContainerField[T_co]):
+class IterableField(ContainerField[T_co, SubT]):
     def __init__(
         self,
         type_: Type[T_co],

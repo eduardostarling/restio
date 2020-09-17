@@ -9,6 +9,7 @@ from typing import (
     Any,
     AsyncGenerator,
     AsyncIterator,
+    Callable,
     Dict,
     Iterable,
     List,
@@ -17,7 +18,6 @@ from typing import (
     Tuple,
     Type,
     TypeVar,
-    cast,
 )
 
 from restio.cache import ModelCache, QueryCache
@@ -39,7 +39,7 @@ from restio.model import (
 from restio.query import BaseQuery
 from restio.state import ModelState, ModelStateMachine, Transition
 
-ModelType = TypeVar("ModelType", bound=BaseModel, covariant=True)
+Model_co = TypeVar("Model_co", bound=BaseModel, covariant=True)
 
 
 class PersistencyStrategy(IntEnum):
@@ -83,10 +83,10 @@ class TransactionState(IntEnum):
     ROLLBACK = auto()
 
 
-DecoratorFunc = TypeVar("DecoratorFunc")
+T = TypeVar("T", bound=Callable[..., Any])
 
 
-def transactionstate(state: TransactionState):
+def transactionstate(state: TransactionState) -> Callable[[T], T]:
     """
     Decorates the current method to define the state of the transaction
     during its execution.
@@ -106,7 +106,7 @@ def transactionstate(state: TransactionState):
         finally:
             t._state.reset(token)
 
-    def deco(func: DecoratorFunc) -> DecoratorFunc:
+    def deco(func: T) -> T:
         if not asyncio.iscoroutinefunction(func):
 
             @wraps(func)
@@ -184,7 +184,7 @@ class Transaction:
 
     _model_cache: ModelCache
     _query_cache: QueryCache
-    _daos: Dict[Type[ModelType], BaseDAO]
+    _daos: Dict[Type[BaseModel], BaseDAO]
     _strategy: PersistencyStrategy
     _state: ContextVar[TransactionState]
     _model_lock: Dict[str, asyncio.Lock]
@@ -222,7 +222,7 @@ class Transaction:
         """
         return self._state.get()
 
-    def register_dao(self, dao: BaseDAO[ModelType]):
+    def register_dao(self, dao: BaseDAO[BaseModel]):
         """
         Registers a DAO instance to the transaction and maps its model type in the
         local dictionary.
@@ -235,7 +235,7 @@ class Transaction:
             self._daos[model_type] = dao
             dao.transaction = self
 
-    def get_dao(self, model_type: Type[ModelType]) -> BaseDAO[ModelType]:
+    def get_dao(self, model_type: Type[Model_co]) -> BaseDAO[Model_co]:
         """
         Returns the DAO associated with `model_type`.
 
@@ -254,7 +254,7 @@ class Transaction:
         return dao
 
     @transactionstate(TransactionState.GET)
-    async def get(self, model_type: Type[ModelType], **keys) -> ModelType:
+    async def get(self, model_type: Type[Model_co], **keys) -> Model_co:
         """
         Tries retrieving the model of type `model_type` and primary keys `keys` from
         the local cache. If not found, then calls the `get` method of the DAO
@@ -279,7 +279,7 @@ class Transaction:
 
         async with model_lock:
             pks: Tuple[Any, ...] = tuple(pks_dict.values())
-            model: Optional[ModelType] = self._model_cache.get_by_primary_key(
+            model: Optional[Model_co] = self._model_cache.get_by_primary_key(
                 (model_type, pks)
             )
             if model:
@@ -288,7 +288,7 @@ class Transaction:
             dao: BaseDAO = self.get_dao(model_type)
             check_dao_implemented_method(dao.get)
 
-            model = cast(model_type, await dao.get(**pks_dict))
+            model = await dao.get(**pks_dict)
             if model:
                 model._state = ModelStateMachine.transition(
                     Transition.GET_OBJECT, model._state
@@ -302,13 +302,13 @@ class Transaction:
             f"({keys_str}) was found"
         )
 
-    def _get_model_lock(self, model_type: Type[ModelType], **keys) -> asyncio.Lock:
+    def _get_model_lock(self, model_type: Type[BaseModel], **keys) -> asyncio.Lock:
         keys_str = ", ".join("{}={}".format(k, str(v)) for k, v in keys.items())
         lock_hash = f"{model_type.__name__}/{str(keys_str)}"
         return self._model_lock.setdefault(lock_hash, asyncio.Lock())
 
     @transactionstate(TransactionState.ADD)
-    def add(self, model: ModelType):
+    def add(self, model: BaseModel):
         """
         Adds the new `model` to the local cache and schedules for adding in the remote
         server during `commit`.
@@ -341,7 +341,7 @@ class Transaction:
         model._state = ModelStateMachine.transition(Transition.ADD_OBJECT, model._state)
         self.register_model(model, force=False)
 
-    def remove(self, model: ModelType) -> bool:
+    def remove(self, model: BaseModel) -> bool:
         """
         Schedules model for removal on the remote server during `commit`.
 
@@ -358,7 +358,7 @@ class Transaction:
 
         return model._state == ModelState.DELETED
 
-    def _assert_cache_internal_id(self, model: ModelType):
+    def _assert_cache_internal_id(self, model: BaseModel):
         _check_model_type(model)
 
         if not self._model_cache.is_registered_by_id(model):
@@ -366,10 +366,10 @@ class Transaction:
                 f"Model with internal id {model._internal_id} not found on cache."
             )
 
-    def _pre_update(self, model: ModelType, field: Field[T_co], value: T_co):
+    def _pre_update(self, model: Model_co, field: Field[T_co], value: T_co):
         self._check_frozen_field(model, field)
 
-    def _check_frozen_field(self, model: ModelType, field: Field[T_co]):
+    def _check_frozen_field(self, model: BaseModel, field: Field):
         # During COMMIT, ROLLBACK and GET, all changes to models
         # should be allowed, regardless of the field being or not frozen
         if self.state in (
@@ -452,8 +452,8 @@ class Transaction:
 
     @transactionstate(TransactionState.GET)
     async def query(
-        self, query: BaseQuery[ModelType], force: bool = False
-    ) -> Tuple[ModelType, ...]:
+        self, query: BaseQuery[Model_co], force: bool = False
+    ) -> Tuple[Model_co, ...]:
         """
         Runs custom query `query` and registers results in the local cache.
 
@@ -497,7 +497,7 @@ class Transaction:
         # values stored for the query in cache
         return self._query_cache.get(query)  # type: ignore
 
-    def register_model(self, model: ModelType, force: bool = False) -> bool:
+    def register_model(self, model: BaseModel, force: bool = False) -> bool:
         """
         Registers the `model` in the internal cache. If the model is already registered
         and `force` is False, then the operation is skipped.
@@ -525,7 +525,7 @@ class Transaction:
 
         return registered
 
-    def unregister_model(self, model: ModelType):
+    def unregister_model(self, model: BaseModel):
         """
         Unregisters model from the internal cache.
 
@@ -538,18 +538,18 @@ class Transaction:
         finally:
             self._unsubscribe_update(model)
 
-    def _subscribe_update(self, model: ModelType):
+    def _subscribe_update(self, model: BaseModel):
         model._listener.subscribe(MODEL_PRE_UPDATE_EVENT, self._pre_update)
         model._listener.subscribe(MODEL_UPDATE_EVENT, self._update)
 
-    def _unsubscribe_update(self, model: ModelType):
+    def _unsubscribe_update(self, model: BaseModel):
         model._listener.unsubscribe(MODEL_PRE_UPDATE_EVENT, self._pre_update)
         model._listener.unsubscribe(MODEL_UPDATE_EVENT, self._update)
 
     async def register_query(
         self,
-        query: BaseQuery[ModelType],
-        models: Iterable[ModelType],
+        query: BaseQuery[Model_co],
+        models: Iterable[Model_co],
         force: bool = False,
     ):
         """
@@ -566,7 +566,7 @@ class Transaction:
                        as a tuple.
         :param force: Forces the operation if True, skips otherwise. Defaults to False.
         """
-        registered_models: Tuple[ModelType, ...] = tuple()
+        registered_models: Tuple[Model_co, ...] = tuple()
 
         for model in models:
             if self._model_cache.has_model_with_keys(model):
@@ -638,7 +638,7 @@ class Transaction:
 
         return results
 
-    def _check_models_consistency(self, models: Set[ModelType]):
+    def _check_models_consistency(self, models: Set[BaseModel]):
         for model in models:
             self._check_model_is_valid(model)
 
@@ -646,12 +646,12 @@ class Transaction:
 
         self._check_deleted_models(models)
 
-    def _check_models_children(self, models: Set[ModelType], recursive: bool):
+    def _check_models_children(self, models: Set[BaseModel], recursive: bool):
         for model in models:
             for child in model.get_children(recursive=recursive):
                 self._check_model_is_valid(child)
 
-    def _check_model_is_valid(self, model: ModelType):
+    def _check_model_is_valid(self, model: BaseModel):
         status_valid = model._state not in (ModelState.DISCARDED, ModelState.UNBOUND,)
 
         if not status_valid:
@@ -746,10 +746,10 @@ class Transaction:
             yield x
 
     async def _process_tree(
-        self, tree: Tree[ModelType], direction: NavigationDirection
+        self, tree: Tree[Model_co], direction: NavigationDirection
     ) -> AsyncGenerator[DAOTask, None]:
-        navigate_queue: asyncio.Queue[Node[ModelType]] = asyncio.Queue()
-        finished_queue: asyncio.Queue[DAOTask[ModelType]] = asyncio.Queue()
+        navigate_queue: asyncio.Queue[Node[Model_co]] = asyncio.Queue()
+        finished_queue: asyncio.Queue[DAOTask[Model_co]] = asyncio.Queue()
         tasks: List[asyncio.Task] = []
         cancel = False
 
@@ -798,8 +798,8 @@ class Transaction:
             yield await finished_queue.get()
 
     def _get_dao_tasks(
-        self, nodes: Set[Node[ModelType]]
-    ) -> Dict[Node[ModelType], DAOTask[ModelType]]:
+        self, nodes: Set[Node[Model_co]]
+    ) -> Dict[Node[Model_co], DAOTask[Model_co]]:
         callables = {}
 
         for node in nodes:
