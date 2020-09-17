@@ -6,8 +6,11 @@ Changelog
 
 - Added support for Field Setters with the :code:`Field.setter` decorator in models.
 - Added support for the built-in python :code:`@property` in models.
+- Added support for customizable :code:`Meta` nested class in models, which now supports modifying the two new attributes :code:`init` and :code:`init_ignore_extra`.
+- Added :code:`BaseModel` constructor that collects parameters and assigns them to fields automatically by name.
 - Improved performance when registering objects to the transaction cache. Registering a new object to a transaction that already contains many models registered will now be faster. Also, applies when queries retrieve multiple objects at once.
 - **BREAKING CHANGE**: :code:`BaseModel.get_children()` now returns a :code:`Set` instead of a :code:`List`. This also applies to the input argument :code:`children`.
+- **BREAKING CHANGE**: Native fields no longer contain pre-defined default values. Fields without default now are required to be set as part of the constructor of the model, which will raise and Exception otherwise.
 
 
 1.0.0b2

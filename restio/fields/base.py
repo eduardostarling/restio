@@ -49,6 +49,7 @@ SetterType = Callable[[Model_co, T_co], T_co]
 class Field(Generic[T_co], object):
     type_: Type[T_co]
     name: str
+    init: bool
     _default: Optional[T_co]
     _default_factory: Optional[Callable[[], T_co]]
     pk: bool
@@ -65,6 +66,7 @@ class Field(Generic[T_co], object):
         allow_none: bool,
         depends_on: bool,
         frozen: FrozenType,
+        init: bool = True,
         default: Union[Optional[T_co], Type[MISSING]] = MISSING,
         default_factory: Union[Optional[Callable[[], T_co]], Type[MISSING]] = MISSING,
         setter: Optional[SetterType] = None,
@@ -83,6 +85,7 @@ class Field(Generic[T_co], object):
         self._default = default
         self._default_factory = default_factory
         self.pk = pk
+        self.init = init
         self.allow_none = allow_none
         self.depends_on = depends_on
         self.frozen = frozen
@@ -126,14 +129,20 @@ class Field(Generic[T_co], object):
 
     @property
     def default(self) -> T_co:
-        if self._default is MISSING and self._default_factory is MISSING:
-            raise ValueError(f"Default value not defined for field {self.name}.")
+        if not self.has_default:
+            raise ValueError(
+                f"Can't initialize field {self.name}: default value not provided."
+            )
 
         return (
             self._default_factory()
             if self._default_factory is not MISSING
             else self._default
         )
+
+    @property
+    def has_default(self) -> bool:
+        return self._default is not MISSING or self._default_factory is not MISSING
 
     def setter(self: "Field[T_co]", method: Optional[SetterType]):
         if method is not None:
@@ -162,6 +171,7 @@ class ContainerField(Field[T_co]):
         allow_none: bool,
         depends_on: bool,
         frozen: FrozenType,
+        init: bool = True,
         default: Union[Optional[T_co], Type[MISSING]] = MISSING,
         default_factory: Union[Optional[Callable[[], T_co]], Type[MISSING]] = MISSING,
         setter: Optional[SetterType] = None,
@@ -169,6 +179,7 @@ class ContainerField(Field[T_co]):
         super().__init__(
             type_=type_,
             pk=pk,
+            init=init,
             default=default,
             default_factory=default_factory,
             allow_none=allow_none,
@@ -191,6 +202,7 @@ class IterableField(ContainerField[T_co]):
         allow_none: bool,
         depends_on: bool,
         frozen: FrozenType,
+        init: bool = True,
         default: Union[Optional[T_co], Type[MISSING]] = MISSING,
         default_factory: Union[Optional[Callable[[], T_co]], Type[MISSING]] = MISSING,
         setter: Optional[SetterType] = None,
@@ -199,6 +211,7 @@ class IterableField(ContainerField[T_co]):
             type_=type_,
             sub_type=sub_type,
             pk=False,
+            init=init,
             default=default,
             default_factory=default_factory,
             allow_none=allow_none,

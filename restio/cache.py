@@ -99,8 +99,7 @@ class ModelCache:
         """
         Finds model in cache by its primary key.
 
-        :param model_type: The model type to be retrieved.
-        :param keys: The tuple of primary key that identify the model.
+        :param key_hash: The hash representing the primary key in cache.
         :return: If found in cache, returns the model instance. Returns None otherwise.
         """
         return self._key_cache.get(key_hash, None)

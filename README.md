@@ -78,25 +78,13 @@ class ClientAPI:
         await self.session.delete(employee_url)
 
 
-# Model definition - this is where the relational data schema
-# is defined
+# Model definition - this is where the relational data schema is defined
 
 class Employee(BaseModel):
     key: IntField = IntField(pk=True, allow_none=True, frozen=FrozenType.ALWAYS)
     name: StrField = StrField()
     age: IntField = IntField(default=18)
     address: StrField = StrField(default="Company Address")
-
-    def __init__(
-        self,
-        *,
-        name: str,
-        age: Optional[int] = None,
-        address: Optional[str] = None
-    ) -> None:
-        self.name = name
-        self.age = age or self.age  # uses default
-        self.address = address or self.address  # uses default
 
     @address.setter
     def _validate_address(self, address: str):
@@ -133,9 +121,12 @@ class EmployeeDAO(BaseDAO[Employee]):
 
     @staticmethod
     def _map_from_dict(data: Dict[str, Any]) -> Employee:
-        employee = Employee(name=str(data["name"]), age=int(data["age"]), address=str(data["address"]))
-        employee.key = int(data["key"])
-        return employee
+        return Employee(
+            key=int(data["key"]),
+            name=str(data["name"]),
+            age=int(data["age"]),
+            address=str(data["address"])
+        )
 
     @staticmethod
     def _map_to_dict(model: Employee) -> Dict[str, Any]:

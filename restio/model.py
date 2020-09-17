@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type
+from typing import Any, Callable, Dict, Optional, Set, Tuple, Type
 from uuid import UUID, uuid4
 
 from restio.event import EventListener
@@ -15,36 +15,69 @@ def _check_model_type(obj: Optional[BaseModel]):
 
 
 class ModelMeta:
+    __slots__ = ("init", "init_ignore_extra", "fields", "primary_keys")
+
+    init: bool
+    init_ignore_extra: bool
     fields: Dict[str, Field]
     primary_keys: Dict[str, Field]
 
     def __init__(self):
+        self.init = True
+        self.init_ignore_extra = True
         self.fields = dict()
         self.primary_keys = dict()
 
 
+# Read-only meta attributes, can't be modified by model class
+__model_meta_exclude__ = ("fields", "primary_keys")
+
+
 class BaseModelMeta(type):
+    __slots__ = ()
+
     """
     BaseModel metaclass. Responsible to internally cache the data schema in a BaseModel
     subclass by identifying fields and primary keys.
     """
 
     def __new__(cls, name: str, bases: Tuple[Type, ...], dct: Dict[str, Any]):
-        meta: ModelMeta = ModelMeta()
-        dct["_meta"] = meta
-
-        # other internal fields not initialized in BaseModel
+        # internal fields not initialized in BaseModel
         dct["_internal_id"] = None
+        dct["_hash"] = None
         dct["_listener"] = None
         dct["_persistent_values"] = None
 
+        # prepares metadata for the model type
+        meta = ModelMeta()
+        dct["_meta"] = meta
+
+        def _update_meta(_meta: ModelMeta, extend: bool):
+            if not _meta:
+                return
+
+            propagate_meta = set(meta.__slots__) - set(__model_meta_exclude__)
+
+            for meta_attribute in propagate_meta:
+                if not hasattr(_meta, meta_attribute):
+                    continue
+
+                setattr(meta, meta_attribute, getattr(_meta, meta_attribute))
+
+            # excluded meta, needs to be propagated manually
+            if extend:
+                meta.fields.update(_meta.fields)
+                meta.primary_keys.update(_meta.primary_keys)
+
         base: Type[BaseModel]
         for base in bases:
-            try:
-                meta.fields.update(base._meta.fields)
-                meta.primary_keys.update(base._meta.primary_keys)
-            except Exception:
-                pass
+            if not hasattr(base, "_meta"):
+                continue
+
+            _update_meta(base._meta, True)
+
+        _meta: ModelMeta = dct.get("Meta", None)
+        _update_meta(_meta, False)
 
         # process class fields
         for field_name, field_value in dct.items():
@@ -61,6 +94,8 @@ class BaseModelMeta(type):
         instance: BaseModel = super().__call__(*args, **kwargs)
 
         # stores the default after the constructor, if nothing has been set yet
+        # this is implemented here so that this is always called, regardless of the
+        # models with custom constructors calling or not super().__init__()
         for field in instance._meta.fields.values():
             field._store_default(instance, force=False)
 
@@ -122,6 +157,38 @@ class BaseModel(metaclass=BaseModelMeta):
     _hash: int
     _persistent_values: Dict[str, Any]
     _listener: EventListener
+
+    def __init__(self, **kwargs: T_co):
+        """
+        Instantiates the model by matching `kwargs` parameters to field names.
+        Behavior is disabled when init=False in the model Meta class.
+
+        :param kwargs: The dictionary of keyword arguments matching the field names of
+                       the model class.
+        :raises ValueError: When invalid arguments are provided.
+        """
+        meta = self._meta
+
+        if not meta.init:
+            return
+
+        for arg_name, value in kwargs.items():
+            field_object = meta.fields.get(arg_name, None)
+
+            if not field_object:
+                if not meta.init_ignore_extra:
+                    raise ValueError(
+                        "Invalid argument provided to constructor of"
+                        f" `{self.__class__.__name__}`: {arg_name}"
+                    )
+                continue  # pragma: no cover
+
+            if not field_object.init:
+                if not meta.init_ignore_extra:
+                    raise ValueError(f"Attribute `{arg_name}` cannot be initialized.")
+                continue  # pragma: no cover
+
+            field_object.__set__(self, value)
 
     @property
     def _state(self) -> ModelState:

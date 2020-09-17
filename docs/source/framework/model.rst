@@ -20,17 +20,6 @@ For example, a model :code:`Employee` could be written using as following to rep
         age: IntField = IntField(default=18)
         address: StrField = StrField(default="Company Address")
 
-        def __init__(
-            self,
-            *,
-            name: str,
-            age: Optional[int] = None,
-            address: Optional[str] = None
-        ) -> None:
-            self.name = name
-            self.age = age or self.age  # uses default
-            self.address = address or self.address  # uses default
-
         @address.setter
         def _validate_address(self, address: str):
             if not address:
@@ -39,6 +28,7 @@ For example, a model :code:`Employee` could be written using as following to rep
 
 
 All **restio** models should inherit from :code:`restio.model.BaseModel`, and all fields should be of type :code:`restio.fields.Field`. :code:`BaseModel` will guarante that the models can be properly operated by the other **restio** modules, such as Transactions and Data Access Objects.
+
 
 .. _fields:
 
@@ -64,7 +54,7 @@ Default values
 
 Fields' default values are assigned to the model instance as soon as they are accessed for the first time, or right after the constructor returns.
 
-Every Field subtype should have its own default value, which can be configured by either using the keyword :code:`default` or :code:`default_factory`. :code:`default` accepts a static value, while :code:`default_factory` accepts callables.
+Every :code:`Field` subtype should have its own default value, which can be configured by either using the keyword :code:`default` or :code:`default_factory`. :code:`default` accepts a static value, while :code:`default_factory` accepts callables.
 
 Example:
 
@@ -87,20 +77,109 @@ Example:
     another_model.static_default_field   # 25
     another_model.factory_default_field  # 2
 
-Most **restio** native fields will automatically set a :code:`default_factory` function to the field if nothing is provided. For example, the :code:`default_factory` for :code:`IntField()` will internally become :code:`int`, for :code:`StrField()` it will be :code:`str`, etc. This doesn't apply when :code:`allow_none` is :code:`True`, in which case the field's :code:`default_factory` will remain empty while its :code:`default` will be set to :code:`None`.
+No **restio** native field will automatically define a default value. Fields without default are always required, and failing to provide them will cause a failure after the constructor returns. The only exception applies to when fields are nullable (with :code:`allow_none=True`), in which case the default value is :code:`None` unless specified otherwise.
 
-If you wish to force the input to be provided for a particular non-nullable field, then you should implement a constructor :code:`__init__` to the model class.
+
+Constructor
+^^^^^^^^^^^
+
+By default, a model type will have a base constructor with arguments that match the field names. This means that for the model
 
 .. code-block:: python
 
-    from restio.model import BaseModel
-    from restio.fields import IntField
+    class Person(BaseModel):
+        name: StrField = StrField()
+        age: IntField = IntField(default=18)
 
-    class Model(BaseModel):
-        val: IntField = IntField()
+you can instantiate :code:`Person` by
 
-        def __init__(self, val: int) -> None:
-            self.val = val
+.. code-block:: python
+
+    person = Person(name="James Hetfield", age=57)
+
+    person.name  # James Hetfield
+    person.age   # 57
+
+It would also be ok to not provide :code:`age` on the constructor, in which case the default value applies:
+
+.. code-block:: python
+
+    person = Person(name="James Hetfield")
+
+    person.name  # James Hetfield
+    person.age   # 18
+
+Otherwise, fields are mandatory:
+
+.. code-block:: python
+
+    person = Person()  # error!
+
+If you wish to disable or modify the default constructor behavior, you might either deactivate the initialization when defining the class (please see :ref:`model_meta` for details about :code:`class Meta`):
+
+.. code-block:: python
+
+    class Person(BaseModel):
+        class Meta:
+            init = False
+
+        name: StrField = StrField()
+        age: IntField = IntField(default=18)
+
+or overwrite the constructor without calling the base constructor:
+
+.. code-block:: python
+
+    class Person(BaseModel):
+        name: StrField = StrField()
+        age: IntField = IntField(default=18)
+
+        def __init__(self, name: str, age: int):
+            self.name = name
+            self.age = age + 10
+
+It is even possible to have a custom constructor and benefit from the default behavior:
+
+.. code-block:: python
+
+    class Person(BaseModel):
+        name: StrField = StrField()
+        age: IntField = IntField(default=18)
+
+        can_drink: bool
+
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self.can_drink = self.age > 18
+
+
+Fields can also be individually marked to not be initialized by providing :code:`init=False`, in which case the base constructor will ignore the parameter if it is provided. The field value after instantiating the model should either be the field default value or a custom value set by a manually implemented constructor.
+
+.. code-block:: python
+
+    class Person(BaseModel):
+        name: StrField = StrField()
+        age: IntField = IntField(default=18, init=False)
+
+    person = Person(name="James Hetfield", age=57)
+    person.age  # 18
+
+Which is equivalent to
+
+.. code-block:: python
+
+    class Person(BaseModel):
+        name: StrField = StrField()
+        age: IntField = IntField(init=False)
+
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self.age = 18
+
+        person = Person(name="James Hetfield", age=57)
+        person.age  # 18
+
+Failing to assigning a value to a field before the instantiation finishes will result in an Exception.
 
 
 Runtime type-checking
@@ -125,12 +204,7 @@ Example:
 
     class Model(BaseModel):
         id: StrField = StrField(allow_none=True)
-        weight: IntField = IntField()
-
-        def __init__(self, id_: Optional[str] = None, weight: Optional[int] = None) -> None:
-            # assigns default if nothing is provided
-            self.id = id_ or self.id
-            self.weight = weight or self.weight
+        weight: IntField = IntField(default=0)
 
     model = Model()
     model.id      # None
@@ -144,11 +218,11 @@ Example:
     model.weight = "65 kg"  # error
     model.weight            # 65
 
-    model_constructed = Model(id_="value", weight=70)  # ok
+    model_constructed = Model(id="value", weight=70)  # ok
     model_constructed.id                               # value
     model_constructed.weight                           # 70
 
-    model_constructed = Model(id_=1, weight=70)        # error
+    model_constructed = Model(id=1, weight=70)        # error
 
 
 Setters and Properties
@@ -223,8 +297,7 @@ If you wish an even more customized behavior, Models and Fields will support the
                 raise ValueError(f"Employee {self.name} should be 18 or older.")
             self._age = value
 
-    employee = Employee()
-    employee.name = "John"
+    employee = Employee(name="John", age=18)
 
     employee.age = 15   # fails
     employee._age = 15  # succeeds
@@ -275,12 +348,9 @@ Example:
         id: IntField = IntField(pk=True, allow_none=True)
         name: StrField = StrField()
 
-        def __init__(self, name: str) -> None:
-            self.name = name
-
     class Company(BaseModel):
         address: StrField = StrField(default="The Netherlands")
-        employees: FrozenSetModelField[Employee] = FrozenSetModelField(Employee)
+        employees: FrozenSetModelField[Employee] = FrozenSetModelField(Employee, default_factory=frozenset)
 
     employee = Employee(name="Jay Pritchett")
 
@@ -316,13 +386,7 @@ For example, frozen behavior is very useful for primary keys that should be defi
     from restio.transaction import Transaction
 
     class Employee(BaseModel):
-        # setting default_factory=None will make it mandatory to provide a
-        # value before the constructor is finished
-        key: StrField = StrField(pk=True, default_factory=None, frozen=FrozenType.UPDATE)
-
-        def __init__(self, key: str):
-            # assign the value in the constructor
-            self.key = key
+        key: StrField = StrField(pk=True, frozen=FrozenType.UPDATE)
 
     transaction = Transaction()
     ...  # boiler-plate code, assign DAOs, etc
@@ -378,6 +442,28 @@ Or after getting:
     one_more_employee.key  # key_value
     one_more_employee.key = "other_key"  # error, key cannot be modified
 
+.. _model_meta:
+
+Model Meta
+----------
+
+All model classes contain an internal structure :code:`ModelMeta`, which defines the behavior of the model in runtime. Some :code:`ModelMeta` attributes can be overwritten by declaring the model with a nested class :code:`Meta`:
+
+.. code-block:: python
+
+    class Model(BaseModel):
+        class Meta:
+            pass
+
+        ...
+
+The individual attributes given to :code:`Meta` are always static and accumulate through inheritance.
+
+Currently, the following attributes can be provided to :code:`Meta`:
+
+- :code:`init` (:code:`bool`, defaults to :code:`True`): Indicates if the default base constructor behavior will be active. When :code:`True`, parameters given to the constructor will be assigned to fields that match their names. When :code:`False`, this assignment is skipped.
+- :code:`init_ignore_extra` (:code:`bool`, defaults to :code:`True`): Indicates if extra parameters given to the constructor will be ignored. When not ignored, any extra parameter passed to :code:`BaseModel.__init__` raises an Exception.
+
 
 Example using relational models
 -------------------------------
@@ -398,13 +484,6 @@ We can extend the example on the top of this page by implementing and extra `Com
         age: IntField = IntField(default=18)
         address: StrField = StrField(default="Company Address")
 
-        def __init__(
-            self, *, name: str, age: Optional[int] = None, address: Optional[str] = None,
-        ) -> None:
-            self.name = name
-            self.age = age or self.age  # uses default
-            self.address = address or self.address  # uses default
-
         @address.setter
         def _validate_address(self, address: str) -> str:
             if not address:
@@ -413,12 +492,8 @@ We can extend the example on the top of this page by implementing and extra `Com
 
 
     class Company(BaseModel):
-        name: StrField = StrField(pk=True, allow_none=False, frozen=FrozenType.UPDATE)
+        name: StrField = StrField(pk=True, frozen=FrozenType.UPDATE)
         employees: FrozenSetModelField[Employee] = FrozenSetModelField(Employee)
-
-        def __init__(self, name: str, employees: FrozenSet[Employee]):
-            self.name = name
-            self.employees = employees
 
         def hire_employee(self, employee: Employee):
             # frozensets are immutable, therefore we need to re-set the value back to the
@@ -438,9 +513,7 @@ We can extend the example on the top of this page by implementing and extra `Com
     employee_a = Employee(name="Alice", age=27)
     employee_b = Employee(name="Bob", age=19)
 
-    company = Company(
-        name="Awesome Company", employees=frozenset({employee_a})
-    )  # this works
+    company = Company(name="Awesome Company", employees=frozenset({employee_a}))  # this works
 
     employee_c = Employee(name="Junior", age=16)
     company.hire_employee(employee_c)  # this fails

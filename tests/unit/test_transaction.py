@@ -27,18 +27,11 @@ from restio.transaction import PersistencyStrategy, Transaction, TransactionExce
 
 
 class ModelA(BaseModel):
-    key: IntField = IntField(pk=True)
-    v: IntField = IntField()
-    s: StrField = StrField()
-    ex: BoolField = BoolField()
+    key: IntField = IntField(pk=True, default=1)
+    v: IntField = IntField(default=0)
+    s: StrField = StrField(default="")
+    ex: BoolField = BoolField(default=False)
     ref: ModelField[BaseModel] = ModelField(BaseModel)
-
-    def __init__(self, key=1, v=0, s="", ex=False, ref=None):
-        self.key = key
-        self.v = v
-        self.s = s
-        self.ex = ex
-        self.ref = ref
 
 
 class ModelDAO(BaseDAO):
@@ -219,13 +212,13 @@ def _get_all_frozen_fields_non_default(
 ) -> List:
     values = [1, "a", True, (1,), frozenset({"a"}), (ModelA(),), frozenset({ModelA()})]
     fields = [
-        IntField(frozen=frozen),
-        StrField(frozen=frozen),
-        BoolField(frozen=frozen),
-        TupleField(int, frozen=frozen),
-        FrozenSetField(str, frozen=frozen),
-        TupleModelField(ModelA, frozen=frozen),
-        FrozenSetModelField(ModelA, frozen=frozen),
+        IntField(default=0, frozen=frozen),
+        StrField(default="", frozen=frozen),
+        BoolField(default=False, frozen=frozen),
+        TupleField(int, default_factory=tuple, frozen=frozen),
+        FrozenSetField(str, default_factory=frozenset, frozen=frozen),
+        TupleModelField(ModelA, default_factory=tuple, frozen=frozen),
+        FrozenSetModelField(ModelA, default_factory=frozenset, frozen=frozen),
     ]
 
     if with_values:
@@ -495,12 +488,9 @@ class TestTransaction(ModelsFixture):
         self, t, field_type, value, method
     ):
         class Model(BaseModel):
-            key = IntField(pk=True, allow_none=True)
+            key = IntField(default=0, pk=True, allow_none=True)
             field = field_type
-            aux = StrField()
-
-            def __init__(self, key: Optional[int] = None):
-                self.key = key
+            aux = StrField(default="")
 
         t.register_dao(ModelFrozenDAO(Model, value))
         model = None
@@ -818,7 +808,9 @@ class TestTransaction(ModelsFixture):
         child, *_ = models
 
         class Model(BaseModel):
-            ref: TupleModelField[ModelA] = TupleModelField(ModelA)
+            ref: TupleModelField[ModelA] = TupleModelField(
+                ModelA, default_factory=tuple
+            )
 
         t.register_dao(ModelDAO(ModelA))
         t.register_dao(ModelDAO(Model))
@@ -873,7 +865,9 @@ class TestTransaction(ModelsFixture):
         child, *_ = models
 
         class Model(BaseModel):
-            ref: TupleModelField[ModelA] = TupleModelField(ModelA)
+            ref: TupleModelField[ModelA] = TupleModelField(
+                ModelA, default_factory=tuple
+            )
 
         t.register_dao(ModelDAO(ModelA))
         t.register_dao(ModelDAO(Model))

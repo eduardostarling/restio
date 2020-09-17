@@ -17,11 +17,6 @@ class Employee(BaseModel):
     age: IntField = IntField()
     address: StrField = StrField()
 
-    def __init__(self, *, name: str, age: int, address: str):
-        self.name = name
-        self.age = age
-        self.address = address
-
 
 class Company(BaseModel):
     key: StrField = StrField(pk=True, frozen=FrozenType.ALWAYS)
@@ -29,10 +24,6 @@ class Company(BaseModel):
     employees: FrozenSetModelField = FrozenSetModelField(
         Employee, frozen=FrozenType.CREATE
     )
-
-    def __init__(self, *, key: str, name: str):
-        self.key = key
-        self.name = name
 
     def hire_employee(self, employee: Employee):
         self.employees = self.employees.union({employee})
@@ -158,22 +149,18 @@ class EmployeeDAO(BaseDAO[Employee]):
 
     @staticmethod
     def _from_dict(employee_dict: EmployeeDict) -> Employee:
-        employee = Employee(
+        # here we could have simply used Employee(**employee_dict) as well
+        return Employee(
+            key=employee_dict["key"],
             name=employee_dict["name"],
             age=employee_dict["age"],
             address=employee_dict["address"],
         )
-        employee.key = employee_dict["key"]
-
-        return employee
 
 
 class CompanyDAO(BaseDAO[Company]):
     async def get(self, *, key: str) -> Company:
         company_dict = await api.get_company(key)
-
-        # instantiates the company object
-        company = self._from_dict(company_dict)
 
         # now we load all the employees that belong to the company
         company_employees_query = self.get_company_employees(company_key=key)
@@ -185,9 +172,8 @@ class CompanyDAO(BaseDAO[Company]):
             company_employees_query, force=True
         )
 
-        company.employees = frozenset(company_employees)
-
-        return company
+        # instantiates the company object
+        return self._from_dict(company_dict, frozenset(company_employees))
 
     @query
     @classmethod
@@ -237,8 +223,12 @@ class CompanyDAO(BaseDAO[Company]):
         await asyncio.gather(*tasks)
 
     @staticmethod
-    def _from_dict(company_dict: CompanyDict) -> Company:
-        return Company(key=company_dict["key"], name=company_dict["name"])
+    def _from_dict(
+        company_dict: CompanyDict, employees: FrozenSet[Employee]
+    ) -> Company:
+        return Company(
+            key=company_dict["key"], name=company_dict["name"], employees=employees
+        )
 
 
 async def main():
