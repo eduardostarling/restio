@@ -47,6 +47,10 @@ SetterType = Callable[[Model_co, T_co], T_co]
 
 
 class Field(Generic[T_co], object):
+    """
+    Base type for Fields.
+    """
+
     type_: Type[T_co]
     name: str
     init: bool
@@ -129,6 +133,12 @@ class Field(Generic[T_co], object):
 
     @property
     def default(self) -> T_co:
+        """
+        Extracts the default value of the field.
+
+        :raises ValueError: When no default value has been set during initialization.
+        :return: The default value.
+        """
         if not self.has_default:
             raise ValueError(
                 f"Can't initialize field {self.name}: default value not provided."
@@ -142,9 +152,27 @@ class Field(Generic[T_co], object):
 
     @property
     def has_default(self) -> bool:
+        """
+        Indicates if the field has a default value set during the initialization.
+
+        :return: True if a default value has been set, False otherwise.
+        """
         return self._default is not MISSING or self._default_factory is not MISSING
 
-    def setter(self: "Field[T_co]", method: Optional[SetterType]):
+    def setter(self, method: Optional[SetterType]):
+        """
+        Defines the setter function `method` for the current field. `method` is only
+        triggered when a value is assigned to the field through the descriptor
+        protocol.
+
+        :param method: The method to be called for setting the value. Method should
+                       accept 2 parameters and must return the value to be assigned
+                       to the field. The first parameter will contain the instance
+                       from which the setter was called, and the second will contain
+                       the value assigned.
+        :raises ValueError: When the signature of `method` is incorrect.
+        :return: The decorated `method`.
+        """
         if method is not None:
             signature = inspect.signature(method).parameters
             if len(signature) != 2:
