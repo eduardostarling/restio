@@ -22,6 +22,7 @@ class IntField(Field[int]):
         allow_none: bool = False,
         frozen: FrozenType = FrozenType.NEVER,
         setter: Optional[SetterType] = None,
+        repr: bool = True,
     ) -> None:
         super().__init__(
             type_=int,
@@ -33,6 +34,7 @@ class IntField(Field[int]):
             depends_on=False,
             frozen=frozen,
             setter=setter,
+            repr=repr,
         )
 
 
@@ -47,6 +49,7 @@ class StrField(Field[str]):
         allow_none: bool = False,
         frozen: FrozenType = FrozenType.NEVER,
         setter: Optional[SetterType] = None,
+        repr: bool = True,
     ) -> None:
         super().__init__(
             type_=str,
@@ -58,6 +61,7 @@ class StrField(Field[str]):
             depends_on=False,
             frozen=frozen,
             setter=setter,
+            repr=repr,
         )
 
 
@@ -72,6 +76,7 @@ class BoolField(Field[bool]):
         allow_none: bool = False,
         frozen: FrozenType = FrozenType.NEVER,
         setter: Optional[SetterType] = None,
+        repr: bool = True,
     ) -> None:
         super().__init__(
             type_=bool,
@@ -83,6 +88,7 @@ class BoolField(Field[bool]):
             depends_on=False,
             frozen=frozen,
             setter=setter,
+            repr=repr,
         )
 
 
@@ -99,6 +105,7 @@ class TupleField(IterableField[Tuple[SubT, ...], SubT]):
         ] = MISSING,
         frozen: FrozenType = FrozenType.NEVER,
         setter: Optional[SetterType] = None,
+        repr: bool = True,
     ) -> None:
         super().__init__(
             type_=tuple,
@@ -110,6 +117,7 @@ class TupleField(IterableField[Tuple[SubT, ...], SubT]):
             depends_on=depends_on,
             frozen=frozen,
             setter=setter,
+            repr=repr,
         )
 
 
@@ -126,6 +134,7 @@ class FrozenSetField(IterableField[FrozenSet[SubT], SubT]):
         ] = MISSING,
         frozen: FrozenType = FrozenType.NEVER,
         setter: Optional[SetterType] = None,
+        repr: bool = True,
     ) -> None:
         super().__init__(
             type_=frozenset,
@@ -137,6 +146,7 @@ class FrozenSetField(IterableField[FrozenSet[SubT], SubT]):
             depends_on=depends_on,
             frozen=frozen,
             setter=setter,
+            repr=repr,
         )
 
 
@@ -154,6 +164,7 @@ class ModelField(Field[Model_co]):
         depends_on: bool = True,
         frozen: FrozenType = FrozenType.NEVER,
         setter: Optional[SetterType] = None,
+        repr: bool = True,
     ) -> None:
         super().__init__(
             type_=model_type,
@@ -165,6 +176,7 @@ class ModelField(Field[Model_co]):
             depends_on=depends_on,
             frozen=frozen,
             setter=setter,
+            repr=repr,
         )
 
 
@@ -181,6 +193,7 @@ class TupleModelField(TupleField[Model_co]):
         depends_on: bool = True,
         frozen: FrozenType = FrozenType.NEVER,
         setter: Optional[SetterType] = None,
+        repr: bool = True,
     ) -> None:
         super().__init__(
             sub_type=model_type,
@@ -190,6 +203,7 @@ class TupleModelField(TupleField[Model_co]):
             depends_on=depends_on,
             frozen=frozen,
             setter=setter,
+            repr=repr
         )
 
 
@@ -206,6 +220,7 @@ class FrozenSetModelField(FrozenSetField[Model_co]):
         depends_on: bool = True,
         frozen: FrozenType = FrozenType.NEVER,
         setter: Optional[SetterType] = None,
+        repr: bool = True,
     ) -> None:
         super().__init__(
             sub_type=model_type,
@@ -215,4 +230,5 @@ class FrozenSetModelField(FrozenSetField[Model_co]):
             depends_on=depends_on,
             frozen=frozen,
             setter=setter,
+            repr=repr
         )

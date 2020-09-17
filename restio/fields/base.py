@@ -54,12 +54,14 @@ class Field(Generic[T_co], object):
     type_: Type[T_co]
     name: str
     init: bool
-    _default: Optional[T_co]
-    _default_factory: Optional[Callable[[], T_co]]
     pk: bool
     allow_none: bool
     depends_on: bool
     frozen: FrozenType
+    repr: bool
+
+    _default: Optional[T_co]
+    _default_factory: Optional[Callable[[], T_co]]
     _setter: Optional[SetterType]
 
     def __init__(
@@ -74,6 +76,7 @@ class Field(Generic[T_co], object):
         default: Union[Optional[T_co], Type[MISSING]] = MISSING,
         default_factory: Union[Optional[Callable[[], T_co]], Type[MISSING]] = MISSING,
         setter: Optional[SetterType] = None,
+        repr: bool = True,
     ):
         if default is MISSING and default_factory is MISSING:
             if allow_none:
@@ -94,6 +97,7 @@ class Field(Generic[T_co], object):
         self.depends_on = depends_on
         self.frozen = frozen
         self.setter(setter)
+        self.repr = repr
 
     def __set_name__(self, owner, name: str):
         self.name = name
@@ -203,6 +207,7 @@ class ContainerField(Field[T_co], Generic[T_co, SubT]):
         default: Union[Optional[T_co], Type[MISSING]] = MISSING,
         default_factory: Union[Optional[Callable[[], T_co]], Type[MISSING]] = MISSING,
         setter: Optional[SetterType] = None,
+        repr: bool = True,
     ) -> None:
         super().__init__(
             type_=type_,
@@ -214,6 +219,7 @@ class ContainerField(Field[T_co], Generic[T_co, SubT]):
             depends_on=depends_on,
             frozen=frozen,
             setter=setter,
+            repr=repr,
         )
         self.sub_type = sub_type
 
@@ -234,6 +240,7 @@ class IterableField(ContainerField[T_co, SubT]):
         default: Union[Optional[T_co], Type[MISSING]] = MISSING,
         default_factory: Union[Optional[Callable[[], T_co]], Type[MISSING]] = MISSING,
         setter: Optional[SetterType] = None,
+        repr: bool = True,
     ) -> None:
         super().__init__(
             type_=type_,
@@ -246,6 +253,7 @@ class IterableField(ContainerField[T_co, SubT]):
             depends_on=depends_on,
             frozen=frozen,
             setter=setter,
+            repr=repr,
         )
 
     def _check_value(self, instance: "BaseModel", value: SubT):

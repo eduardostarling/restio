@@ -592,3 +592,63 @@ class TestModel:
 
         assert b in one_child
         assert c not in one_child
+
+    def test_model_repr(self):
+        class Model(BaseModel):
+            a: IntField = IntField()
+            b: StrField = StrField()
+            c: IntField = IntField(repr=False)
+
+        model = Model(a=1, b="text", c=2)
+        repr_str = repr(model)
+
+        assert repr_str == "Model(a=1, b='text')"
+
+    def test_model_repr_disabled(self):
+        class Model(BaseModel):
+            class Meta:
+                repr = False
+
+            a: IntField = IntField()
+            b: StrField = StrField()
+            c: IntField = IntField(repr=False)
+
+        model = Model(a=1, b="text", c=2)
+        repr_str = repr(model)
+
+        assert "=1" not in repr_str
+        assert "='text'" not in repr_str
+        assert "=2" not in repr_str
+
+    def test_model_repr_model_dependencies(self):
+        class Model(BaseModel):
+            a: IntField = IntField()
+            b: StrField = StrField(default="")
+            c: ModelField = ModelField(BaseModel)
+            d: TupleField = TupleField(BaseModel, default_factory=tuple)
+
+        model_a = Model(a=1)
+        model_b = Model(a=2, b="text", c=model_a)
+        model_c = Model(a=3, d=(model_a, model_b))
+
+        repr_a = repr(model_a)
+        repr_b = repr(model_b)
+        repr_c = repr(model_c)
+
+        assert repr_a == "Model(a=1, b='', c=None, d=())"
+        assert repr_b == "Model(a=2, b='text', c=%s, d=())" % repr_a
+        assert repr_c == "Model(a=3, b='', c=None, d=(%s, %s))" % (repr_a, repr_b)
+
+    def test_model_repr_model_recursion(self):
+        class Model(BaseModel):
+            c: ModelField = ModelField(BaseModel)
+
+        model = Model()
+        model.c = model
+
+        repr_model = repr(model)
+
+        assert "Model(c=Model(c=Model" in repr_model
+        assert "..." in repr_model
+        assert ")))" in repr_model
+        assert len(repr_model) >= 200
