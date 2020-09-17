@@ -30,11 +30,6 @@ Therefore, we can write the data models as follows:
         age: IntField = IntField()
         address: StrField = StrField()
 
-        def __init__(self, *, name: str, age: int, address: str):
-            self.name = name
-            self.age = age
-            self.address = address
-
 
     class Company(BaseModel):
         key: StrField = StrField(pk=True, frozen=FrozenType.ALWAYS)
@@ -42,10 +37,6 @@ Therefore, we can write the data models as follows:
         employees: FrozenSetModelField = FrozenSetModelField(
             Employee, frozen=FrozenType.CREATE
         )
-
-        def __init__(self, *, key: str, name: str):
-            self.key = key
-            self.name = name
 
         def hire_employee(self, employee: Employee):
             self.employees = self.employees.union({employee})
@@ -204,14 +195,14 @@ First, the :code:`EmployeeDAO`:
 
         @staticmethod
         def _from_dict(employee_dict: EmployeeDict) -> Employee:
-            employee = Employee(
+            # here we could have simply used Employee(**employee_dict) as well
+            return Employee(
+                key=employee_dict["key"],
                 name=employee_dict["name"],
                 age=employee_dict["age"],
                 address=employee_dict["address"],
             )
-            employee.key = employee_dict["key"]
 
-            return employee
 
 And then the :code:`CompanyDAO`:
 
@@ -220,9 +211,6 @@ And then the :code:`CompanyDAO`:
     class CompanyDAO(BaseDAO[Company]):
         async def get(self, *, key: str) -> Company:
             company_dict = await api.get_company(key)
-
-            # instantiates the company object
-            company = self._from_dict(company_dict)
 
             # now we load all the employees that belong to the company
             company_employees_query = self.get_company_employees(company_key=key)
@@ -234,10 +222,8 @@ And then the :code:`CompanyDAO`:
                 company_employees_query, force=True
             )
 
-            # query results are tuples, so we need to convert
-            company.employees = frozenset(company_employees)
-
-            return company
+            # instantiates the company object
+            return self._from_dict(company_dict, frozenset(company_employees))
 
         @query
         @classmethod
@@ -285,8 +271,12 @@ And then the :code:`CompanyDAO`:
                 tasks.append(task)
 
         @staticmethod
-        def _from_dict(company_dict: CompanyDict) -> Company:
-            return Company(key=company_dict["key"], name=company_dict["name"])
+        def _from_dict(
+            company_dict: CompanyDict, employees: FrozenSet[Employee]
+        ) -> Company:
+            return Company(
+                key=company_dict["key"], name=company_dict["name"], employees=employees
+            )
 
 
 Hiring a new employee :code:`Chandler Bing` to :code:`Amazing Company A` can now be done by implementing :code:`main`. Note that all the requests to persist data are done in :code:`transaction.commit()`:
@@ -310,7 +300,7 @@ Hiring a new employee :code:`Chandler Bing` to :code:`Amazing Company A` can now
         # hires Chandler Bing, that lives together with Joseph
         chandler = Employee(name="Chandler Bing", age=26, address=joseph.address)
         transaction.add(chandler)
-        
+
         company_a.hire_employee(chandler)
 
         # this is where all the requests are effectively made

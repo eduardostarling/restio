@@ -54,17 +54,6 @@ We can now use a **DAO** to persist the model :code:`Employee` using the :code:`
         age: IntField = IntField(default=18)
         address: StrField = StrField(default="Company Address")
 
-        def __init__(
-            self,
-            *,
-            name: str,
-            age: Optional[int] = None,
-            address: Optional[str] = None,
-        ) -> None:
-            self.name = name
-            self.age = age or self.age  # uses default
-            self.address = address or self.address  # uses default
-
         @address.setter
         def _validate_address(self, address: str):
             if not address:
@@ -174,17 +163,6 @@ A complete implementation of the :code:`EmployeeDAO` and :code:`ClientAPI` for a
         name: StrField = StrField()
         age: IntField = IntField(default=18)
         address: StrField = StrField(default="Company Address")
-
-        def __init__(
-            self,
-            *,
-            name: str,
-            age: Optional[int] = None,
-            address: Optional[str] = None,
-        ) -> None:
-            self.name = name
-            self.age = age or self.age  # uses default
-            self.address = address or self.address  # uses default
 
         @address.setter
         def _validate_address(self, address: str):

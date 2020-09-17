@@ -23,10 +23,10 @@ from typing import (
 # implementation. The node objects in this case will have to be Hashable.
 from restio.model import BaseModel
 
-ModelType = TypeVar("ModelType", bound=BaseModel, covariant=True)
+Model_co = TypeVar("Model_co", bound=BaseModel, covariant=True)
 
 
-class Node(Generic[ModelType]):
+class Node(Generic[Model_co]):
     """
     Represents a Node in a Tree of a DependencyGraph.
 
@@ -35,23 +35,23 @@ class Node(Generic[ModelType]):
     above and below them in the Tree.
     """
 
-    node_object: ModelType
-    parents: Set[Node[ModelType]]
-    children: Set[Node[ModelType]]
+    node_object: Model_co
+    parents: Set[Node[Model_co]]
+    children: Set[Node[Model_co]]
 
     def __init__(
         self,
-        node_object: ModelType,
-        parents: Optional[Set[Node[ModelType]]] = None,
-        children: Optional[Set[Node[ModelType]]] = None,
+        node_object: Model_co,
+        parents: Optional[Set[Node[Model_co]]] = None,
+        children: Optional[Set[Node[Model_co]]] = None,
     ):
         self.node_object = node_object
         self.parents = parents if parents else set()
         self.children = children if children else set()
 
     def get_children(
-        self, recursive: bool = False, children: Optional[Set[Node[ModelType]]] = None
-    ) -> Set[Node[ModelType]]:
+        self, recursive: bool = False, children: Optional[Set[Node[Model_co]]] = None
+    ) -> Set[Node[Model_co]]:
         """
         Returns the child nodes of the current Node.
 
@@ -66,8 +66,8 @@ class Node(Generic[ModelType]):
         return self._get_nodes("children", recursive=recursive, nodes=children)
 
     def get_parents(
-        self, recursive: bool = False, parents: Optional[Set[Node[ModelType]]] = None
-    ) -> Set[Node[ModelType]]:
+        self, recursive: bool = False, parents: Optional[Set[Node[Model_co]]] = None
+    ) -> Set[Node[Model_co]]:
         """
         Returns the parent nodes of the current Node.
 
@@ -85,7 +85,7 @@ class Node(Generic[ModelType]):
         self,
         nodes_attribute: str,
         recursive: bool = False,
-        nodes: Optional[Set[Node[ModelType]]] = None,
+        nodes: Optional[Set[Node[Model_co]]] = None,
     ) -> Set[Node]:
         dependent_nodes = getattr(self, nodes_attribute, [])
 
@@ -115,7 +115,7 @@ class Node(Generic[ModelType]):
         return self.node_object.__hash__() == other.node_object.__hash__()
 
 
-GetRelativesCallable = Callable[..., Set[Node[ModelType]]]
+GetRelativesCallable = Callable[..., Set[Node[Model_co]]]
 NavigationDirection = Tuple[GetRelativesCallable, GetRelativesCallable]
 
 
@@ -137,7 +137,7 @@ class NavigationType:
     )
 
 
-class Tree(Generic[ModelType]):
+class Tree(Generic[Model_co]):
     """
     Represents a Tree in a DependencyGraph.
 
@@ -146,20 +146,20 @@ class Tree(Generic[ModelType]):
     method `process`.
     """
 
-    nodes: Set[Node[ModelType]]
+    nodes: Set[Node[Model_co]]
     _canceled: bool
     _processing: bool
 
-    def __init__(self, nodes: Set[Node[ModelType]]):
+    def __init__(self, nodes: Set[Node[Model_co]]):
         self.nodes = nodes
         self._canceled = False
         self._processing = False
 
     async def navigate(
         self,
-        nodes: Set[Node[ModelType]],
+        nodes: Set[Node[Model_co]],
         direction: NavigationDirection,
-        processed_nodes: asyncio.Queue[Node[ModelType]],
+        processed_nodes: asyncio.Queue[Node[Model_co]],
     ) -> AsyncGenerator[Node, bool]:
         """
         Traverses the dependency Tree based on already processed nodes. The caller
@@ -211,7 +211,7 @@ class Tree(Generic[ModelType]):
                 if not nodes_from_direction.intersection(nodes):
                     next_nodes.appendleft(node_to)
 
-    def get_roots(self) -> Set[Node[ModelType]]:
+    def get_roots(self) -> Set[Node[Model_co]]:
         """
         Returns all roots of the Tree.
 
@@ -219,7 +219,7 @@ class Tree(Generic[ModelType]):
         """
         return self._get_tree_roots(self.nodes)
 
-    def get_leafs(self) -> Set[Node[ModelType]]:
+    def get_leafs(self) -> Set[Node[Model_co]]:
         """
         Returns all leaves of the Tree.
 
@@ -227,7 +227,7 @@ class Tree(Generic[ModelType]):
         """
         return self._get_tree_leafs(self.nodes)
 
-    def get_nodes(self) -> Set[Node[ModelType]]:
+    def get_nodes(self) -> Set[Node[Model_co]]:
         """
         Returns a copy of all nodes in the Tree.
 
@@ -244,15 +244,15 @@ class Tree(Generic[ModelType]):
             self._canceled = True
 
     @staticmethod
-    def _get_tree_roots(tree_nodes: Set[Node[ModelType]]) -> Set[Node[ModelType]]:
+    def _get_tree_roots(tree_nodes: Set[Node[Model_co]]) -> Set[Node[Model_co]]:
         return set(filter(lambda x: not x.parents, tree_nodes))
 
     @staticmethod
-    def _get_tree_leafs(tree_nodes: Set[Node[ModelType]]) -> Set[Node[ModelType]]:
+    def _get_tree_leafs(tree_nodes: Set[Node[Model_co]]) -> Set[Node[Model_co]]:
         return set(filter(lambda x: not x.children, tree_nodes))
 
 
-class DependencyGraph(Generic[ModelType]):
+class DependencyGraph(Generic[Model_co]):
     """
     Represents dependency graph made of a combination of Tree instances.
 
@@ -261,13 +261,13 @@ class DependencyGraph(Generic[ModelType]):
     a set of objects of type BaseModel.
     """
 
-    trees: List[Tree[ModelType]] = []
+    trees: List[Tree[Model_co]] = []
 
-    def __init__(self, trees: List[Tree[ModelType]]):
+    def __init__(self, trees: List[Tree[Model_co]]):
         self.trees = trees
 
     @classmethod
-    def generate_from_objects(cls, objects: Set[ModelType]) -> DependencyGraph:
+    def generate_from_objects(cls, objects: Set[Model_co]) -> DependencyGraph:
         """
         Generates a DependencyGraph instance based on the set of BaseModel instances
         `objects`.
@@ -279,7 +279,7 @@ class DependencyGraph(Generic[ModelType]):
         return cls.generate_from_nodes(nodes)
 
     @classmethod
-    def generate_from_nodes(cls, nodes: Set[Node[ModelType]]) -> DependencyGraph:
+    def generate_from_nodes(cls, nodes: Set[Node[Model_co]]) -> DependencyGraph:
         """
         Generates a DependencyGraph instance based on the set of Node instances `nodes`.
 
@@ -310,7 +310,7 @@ class DependencyGraph(Generic[ModelType]):
         return cls(trees)
 
     @staticmethod
-    def _get_connected_nodes(objects: Set[ModelType]) -> Set[Node]:
+    def _get_connected_nodes(objects: Set[Model_co]) -> Set[Node]:
         nodes: Dict[str, Node] = {}
 
         # creates nodes

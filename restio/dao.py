@@ -36,10 +36,10 @@ def check_dao_implemented_method(function: FunctionType):
         )
 
 
-ModelType = TypeVar("ModelType", bound=BaseModel)
+Model_co = TypeVar("Model_co", bound=BaseModel, covariant=True)
 
 
-class BaseDAO(Generic[ModelType]):
+class BaseDAO(Generic[Model_co]):
     """
     Base abstract class for Data Access Objects (DAO).
 
@@ -66,10 +66,10 @@ class BaseDAO(Generic[ModelType]):
     overwritten in the subclass if the operation is permitted by the REST API.
     """
 
-    _model_type: Type[ModelType]
+    _model_type: Type[Model_co]
     _transaction: Optional["Transaction"]
 
-    def __init__(self, model_type: Optional[Type[ModelType]] = None) -> None:
+    def __init__(self, model_type: Optional[Type[Model_co]] = None) -> None:
         if model_type:
             self._model_type = model_type
 
@@ -91,7 +91,7 @@ class BaseDAO(Generic[ModelType]):
         self._transaction = transaction
 
     @not_implemented_method
-    async def get(self, **keys) -> ModelType:  # type: ignore
+    async def get(self, **keys) -> Model_co:  # type: ignore
         """
         Retrieves a model from the remote server.
 
@@ -104,7 +104,7 @@ class BaseDAO(Generic[ModelType]):
         pass
 
     @not_implemented_method
-    async def add(self, obj: ModelType):
+    async def add(self, obj: Model_co):
         """
         Creates a model in the remote server.
 
@@ -113,7 +113,7 @@ class BaseDAO(Generic[ModelType]):
         pass
 
     @not_implemented_method
-    async def remove(self, obj: ModelType):
+    async def remove(self, obj: Model_co):
         """
         Removes a model from the remote server.
 
@@ -122,7 +122,7 @@ class BaseDAO(Generic[ModelType]):
         pass
 
     @not_implemented_method
-    async def update(self, obj: ModelType):
+    async def update(self, obj: Model_co):
         """
         Updates a model in the remote server.
 
@@ -131,10 +131,10 @@ class BaseDAO(Generic[ModelType]):
         pass
 
 
-DAOTaskCallable = Callable[[ModelType], Awaitable[None]]
+DAOTaskCallable = Callable[[Model_co], Awaitable[None]]
 
 
-class DAOTask(Generic[ModelType]):
+class DAOTask(Generic[Model_co]):
     """
     Wrapper object that, when awaited, contains a asyncio.Task ran by a a DAO method
     during a Transaction commit.
@@ -149,20 +149,20 @@ class DAOTask(Generic[ModelType]):
     execution.
     """
 
-    _task: Optional[asyncio.Task[Optional[ModelType]]]
-    node: Node[ModelType]
+    _task: Optional[asyncio.Task[Optional[Model_co]]]
+    node: Node[Model_co]
     func: DAOTaskCallable
     start_time: float
     end_time: float
 
-    def __init__(self, node: Node[ModelType], func: DAOTaskCallable):
+    def __init__(self, node: Node[Model_co], func: DAOTaskCallable):
         self.node = node
         self.func = func
         self.start_time = 0.0
         self.end_time = 0.0
         self._task = None
 
-    def run_task(self) -> asyncio.Task[Optional[ModelType]]:
+    def run_task(self) -> asyncio.Task[Optional[Model_co]]:
         """
         Creates and returns an asyncio.Task that runs `func` when called for the first
         time.
@@ -177,9 +177,7 @@ class DAOTask(Generic[ModelType]):
 
         self.start_time = time.time()
 
-        task: asyncio.Task = asyncio.create_task(
-            self.func(self.node.node_object)
-        )
+        task: asyncio.Task = asyncio.create_task(self.func(self.node.node_object))
         task.add_done_callback(self._task_finished)
 
         self._task = task
@@ -189,7 +187,7 @@ class DAOTask(Generic[ModelType]):
         return (yield from self.run_task().__await__())
 
     @property
-    def task(self) -> asyncio.Task[Optional[ModelType]]:
+    def task(self) -> asyncio.Task[Optional[Model_co]]:
         """
         Contains the underlying asyncio.Task.
 
@@ -217,7 +215,7 @@ class DAOTask(Generic[ModelType]):
         return self.end_time - self.start_time
 
     @property
-    def model(self) -> ModelType:
+    def model(self) -> Model_co:
         """
         Returns the BaseModel contained by the `node`.
 

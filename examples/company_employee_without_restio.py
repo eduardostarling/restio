@@ -21,6 +21,7 @@ COMPANY_EMPLOYEE_URL = (
 
 # Models
 
+
 class Employee:
     key: int
     name: str

@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Callable, FrozenSet, List
+from typing import Any, Callable, FrozenSet, List, Tuple
 
 from restio.dao import BaseDAO
 from restio.query import query
@@ -57,36 +57,33 @@ class CompanyDAO(BaseDAO[Company]):
 
     async def get(self, *, key: str) -> Company:
         company_dict = await self.api.get_company(key)
-        company = self._from_dict(company_dict)
+        employees = await self._load_company_employees(key)
 
-        company_employees_query = self.get_company_employees(company_key=key)
-        company_employees = await self.transaction.query(
-            company_employees_query, force=True
-        )
-
-        company.employees = frozenset(company_employees)
-
-        return company
+        return self._from_dict(company_dict, employees)
 
     @query
     async def get_all_companies(self) -> List[Company]:
-        companies = [self._from_dict(e) for e in await self.api.get_all_companies()]
+        companies = [
+            self._from_dict(e, frozenset()) for e in await self.api.get_all_companies()
+        ]
         employee_tasks = []
 
         for company in companies:
-            company_employees_query = self.get_company_employees(
-                company_key=company.key
-            )
-            company_employees_coro = self.transaction.query(
-                company_employees_query, force=True
-            )
-            employee_tasks.append(asyncio.create_task(company_employees_coro))
+            task = asyncio.create_task(self._load_company_employees(company.key))
+            employee_tasks.append(task)
 
         results = await asyncio.gather(*employee_tasks)
         for company, employees in zip(companies, results):
-            company.employees = frozenset(employees)
+            company.employees = employees
 
         return companies
+
+    async def _load_company_employees(self, key: str) -> FrozenSet[Employee]:
+        company_employees_query = self.get_company_employees(company_key=key)
+        employees: Tuple[Employee, ...] = await self.transaction.query(
+            company_employees_query, force=True
+        )
+        return frozenset(employees)
 
     @query
     async def get_company_employees(self, company_key: str) -> FrozenSet[Employee]:
@@ -128,5 +125,9 @@ class CompanyDAO(BaseDAO[Company]):
         await asyncio.gather(*tasks)
 
     @staticmethod
-    def _from_dict(company_dict: CompanyDict) -> Company:
-        return Company(key=company_dict["key"], name=company_dict["name"])
+    def _from_dict(
+        company_dict: CompanyDict, employees: FrozenSet[Employee]
+    ) -> Company:
+        return Company(
+            key=company_dict["key"], name=company_dict["name"], employees=employees
+        )

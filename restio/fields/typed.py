@@ -1,10 +1,11 @@
-from typing import Callable, FrozenSet, Optional, Tuple, Type, TypeVar, Union
+from typing import Callable, FrozenSet, Optional, Tuple, Type, Union
 
 from restio.fields.base import (
     MISSING,
     Field,
     FrozenType,
     IterableField,
+    Model_co,
     SetterType,
     SubT,
 )
@@ -15,20 +16,17 @@ class IntField(Field[int]):
         self,
         *,
         pk: bool = False,
+        init: bool = True,
         default: Union[Optional[int], Type[MISSING]] = MISSING,
         default_factory: Union[Optional[Callable[[], int]], Type[MISSING]] = MISSING,
         allow_none: bool = False,
         frozen: FrozenType = FrozenType.NEVER,
         setter: Optional[SetterType] = None,
     ) -> None:
-        default_factory = (
-            int
-            if default is MISSING and default_factory is MISSING and not allow_none
-            else default_factory
-        )
         super().__init__(
             type_=int,
             pk=pk,
+            init=init,
             default=default,
             default_factory=default_factory,
             allow_none=allow_none,
@@ -43,20 +41,17 @@ class StrField(Field[str]):
         self,
         *,
         pk: bool = False,
+        init: bool = True,
         default: Union[Optional[str], Type[MISSING]] = MISSING,
         default_factory: Union[Optional[Callable[[], str]], Type[MISSING]] = MISSING,
         allow_none: bool = False,
         frozen: FrozenType = FrozenType.NEVER,
         setter: Optional[SetterType] = None,
     ) -> None:
-        default_factory = (
-            str
-            if default is MISSING and default_factory is MISSING and not allow_none
-            else default_factory
-        )
         super().__init__(
             type_=str,
             pk=pk,
+            init=init,
             default=default,
             default_factory=default_factory,
             allow_none=allow_none,
@@ -71,20 +66,17 @@ class BoolField(Field[bool]):
         self,
         *,
         pk: bool = False,
+        init: bool = True,
         default: Union[Optional[bool], Type[MISSING]] = MISSING,
         default_factory: Union[Optional[Callable[[], bool]], Type[MISSING]] = MISSING,
         allow_none: bool = False,
         frozen: FrozenType = FrozenType.NEVER,
         setter: Optional[SetterType] = None,
     ) -> None:
-        default_factory = (
-            bool
-            if default is MISSING and default_factory is MISSING and not allow_none
-            else default_factory
-        )
         super().__init__(
             type_=bool,
             pk=pk,
+            init=init,
             default=default,
             default_factory=default_factory,
             allow_none=allow_none,
@@ -94,11 +86,12 @@ class BoolField(Field[bool]):
         )
 
 
-class TupleField(IterableField[Tuple[SubT, ...]]):
+class TupleField(IterableField[Tuple[SubT, ...], SubT]):
     def __init__(
         self,
         sub_type: Type[SubT],
         *,
+        init: bool = True,
         depends_on: bool = False,
         default: Union[Optional[Tuple[SubT, ...]], Type[MISSING]] = MISSING,
         default_factory: Union[
@@ -107,14 +100,10 @@ class TupleField(IterableField[Tuple[SubT, ...]]):
         frozen: FrozenType = FrozenType.NEVER,
         setter: Optional[SetterType] = None,
     ) -> None:
-        default_factory = (
-            tuple
-            if default is MISSING and default_factory is MISSING
-            else default_factory
-        )
         super().__init__(
             type_=tuple,
             sub_type=sub_type,
+            init=init,
             default=default,
             default_factory=default_factory,
             allow_none=False,
@@ -124,11 +113,12 @@ class TupleField(IterableField[Tuple[SubT, ...]]):
         )
 
 
-class FrozenSetField(IterableField[FrozenSet[SubT]]):
+class FrozenSetField(IterableField[FrozenSet[SubT], SubT]):
     def __init__(
         self,
         sub_type: Type[SubT],
         *,
+        init: bool = True,
         depends_on: bool = False,
         default: Union[Optional[FrozenSet[SubT]], Type[MISSING]] = MISSING,
         default_factory: Union[
@@ -137,14 +127,10 @@ class FrozenSetField(IterableField[FrozenSet[SubT]]):
         frozen: FrozenType = FrozenType.NEVER,
         setter: Optional[SetterType] = None,
     ) -> None:
-        default_factory = (
-            frozenset
-            if default is MISSING and default_factory is MISSING
-            else default_factory
-        )
         super().__init__(
             type_=frozenset,
             sub_type=sub_type,
+            init=init,
             default=default,
             default_factory=default_factory,
             allow_none=False,
@@ -154,17 +140,15 @@ class FrozenSetField(IterableField[FrozenSet[SubT]]):
         )
 
 
-ModelType = TypeVar("ModelType", covariant=True)
-
-
-class ModelField(Field[ModelType]):
+class ModelField(Field[Model_co]):
     def __init__(
         self,
-        model_type: Type[ModelType],
+        model_type: Type[Model_co],
         *,
-        default: Union[Optional[ModelType], Type[MISSING]] = MISSING,
+        init: bool = True,
+        default: Union[Optional[Model_co], Type[MISSING]] = MISSING,
         default_factory: Union[
-            Optional[Callable[[], ModelType]], Type[MISSING]
+            Optional[Callable[[], Model_co]], Type[MISSING]
         ] = MISSING,
         allow_none: bool = True,
         depends_on: bool = True,
@@ -174,6 +158,7 @@ class ModelField(Field[ModelType]):
         super().__init__(
             type_=model_type,
             pk=False,
+            init=init,
             default=default,
             default_factory=default_factory,
             allow_none=allow_none,
@@ -183,14 +168,15 @@ class ModelField(Field[ModelType]):
         )
 
 
-class TupleModelField(TupleField[ModelType]):
+class TupleModelField(TupleField[Model_co]):
     def __init__(
         self,
-        model_type: Type[ModelType],
+        model_type: Type[Model_co],
         *,
-        default: Union[Tuple[ModelType, ...], Type[MISSING]] = MISSING,
+        init: bool = True,
+        default: Union[Tuple[Model_co, ...], Type[MISSING]] = MISSING,
         default_factory: Union[
-            Optional[Callable[[], Tuple[ModelType, ...]]], Type[MISSING]
+            Optional[Callable[[], Tuple[Model_co, ...]]], Type[MISSING]
         ] = MISSING,
         depends_on: bool = True,
         frozen: FrozenType = FrozenType.NEVER,
@@ -198,6 +184,7 @@ class TupleModelField(TupleField[ModelType]):
     ) -> None:
         super().__init__(
             sub_type=model_type,
+            init=init,
             default=default,
             default_factory=default_factory,
             depends_on=depends_on,
@@ -206,14 +193,15 @@ class TupleModelField(TupleField[ModelType]):
         )
 
 
-class FrozenSetModelField(FrozenSetField[ModelType]):
+class FrozenSetModelField(FrozenSetField[Model_co]):
     def __init__(
         self,
-        model_type: Type[ModelType],
+        model_type: Type[Model_co],
         *,
-        default: Union[Optional[FrozenSet[ModelType]], Type[MISSING]] = MISSING,
+        init: bool = True,
+        default: Union[Optional[FrozenSet[Model_co]], Type[MISSING]] = MISSING,
         default_factory: Union[
-            Optional[Callable[[], FrozenSet[ModelType]]], Type[MISSING]
+            Optional[Callable[[], FrozenSet[Model_co]]], Type[MISSING]
         ] = MISSING,
         depends_on: bool = True,
         frozen: FrozenType = FrozenType.NEVER,
@@ -221,6 +209,7 @@ class FrozenSetModelField(FrozenSetField[ModelType]):
     ) -> None:
         super().__init__(
             sub_type=model_type,
+            init=init,
             default=default,
             default_factory=default_factory,
             depends_on=depends_on,

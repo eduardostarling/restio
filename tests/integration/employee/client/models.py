@@ -8,11 +8,6 @@ class Employee(BaseModel):
     age: IntField = IntField()
     address: StrField = StrField()
 
-    def __init__(self, *, name: str, age: int, address: str):
-        self.name = name
-        self.age = age
-        self.address = address
-
     @age.setter
     def _validate_age(self, age: int) -> int:
         if age < 18:
@@ -26,10 +21,6 @@ class Company(BaseModel):
     employees: FrozenSetModelField = FrozenSetModelField(
         Employee, frozen=FrozenType.CREATE
     )
-
-    def __init__(self, *, key: str, name: str):
-        self.key = key
-        self.name = name
 
     def hire_employee(self, employee: Employee):
         self.employees = self.employees.union({employee})
