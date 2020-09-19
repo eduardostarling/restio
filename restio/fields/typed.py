@@ -1,4 +1,6 @@
-from typing import Callable, FrozenSet, Optional, Tuple, Type, Union
+import enum
+import uuid
+from typing import Callable, FrozenSet, Generic, Optional, Tuple, Type, TypeVar, Union
 
 from restio.fields.base import (
     MISSING,
@@ -9,6 +11,9 @@ from restio.fields.base import (
     SetterType,
     SubT,
 )
+
+# Constructors are mostly copy-pasted in this file so autocompletion support is more
+# user friendly in any IDE
 
 
 class IntField(Field[int]):
@@ -80,6 +85,98 @@ class BoolField(Field[bool]):
     ) -> None:
         super().__init__(
             type_=bool,
+            pk=pk,
+            init=init,
+            default=default,
+            default_factory=default_factory,
+            allow_none=allow_none,
+            depends_on=False,
+            frozen=frozen,
+            setter=setter,
+            repr=repr,
+        )
+
+
+class FloatField(Field[float]):
+    def __init__(
+        self,
+        *,
+        pk: bool = False,
+        init: bool = True,
+        default: Union[Optional[float], Type[MISSING]] = MISSING,
+        default_factory: Union[Optional[Callable[[], float]], Type[MISSING]] = MISSING,
+        allow_none: bool = False,
+        frozen: FrozenType = FrozenType.NEVER,
+        setter: Optional[SetterType] = None,
+        repr: bool = True,
+    ) -> None:
+        super().__init__(
+            type_=float,
+            pk=pk,
+            init=init,
+            default=default,
+            default_factory=default_factory,
+            allow_none=allow_none,
+            depends_on=False,
+            frozen=frozen,
+            setter=setter,
+            repr=repr,
+        )
+
+
+class UUIDField(Field[uuid.UUID]):
+    def __init__(
+        self,
+        *,
+        pk: bool = False,
+        init: bool = True,
+        default: Union[Optional[uuid.UUID], Type[MISSING]] = MISSING,
+        default_factory: Union[
+            Optional[Callable[[], uuid.UUID]], Type[MISSING]
+        ] = MISSING,
+        allow_none: bool = False,
+        frozen: FrozenType = FrozenType.NEVER,
+        setter: Optional[SetterType] = None,
+        repr: bool = True,
+    ) -> None:
+        super().__init__(
+            type_=uuid.UUID,
+            pk=pk,
+            init=init,
+            default=default,
+            default_factory=default_factory,
+            allow_none=allow_none,
+            depends_on=False,
+            frozen=frozen,
+            setter=setter,
+            repr=repr,
+        )
+
+
+EnumType = TypeVar("EnumType", bound=enum.Enum)
+
+
+class EnumField(Field[EnumType], Generic[EnumType]):
+    def __init__(
+        self,
+        type_: Type[EnumType],
+        *,
+        pk: bool = False,
+        init: bool = True,
+        default: Union[Optional[EnumType], Type[MISSING]] = MISSING,
+        default_factory: Union[
+            Optional[Callable[[], EnumType]], Type[MISSING]
+        ] = MISSING,
+        allow_none: bool = False,
+        frozen: FrozenType = FrozenType.NEVER,
+        setter: Optional[SetterType] = None,
+        repr: bool = True,
+    ) -> None:
+        if not issubclass(type_, enum.Enum):
+            raise TypeError("FieldEnum provided type must be a subclass of enum.Enum.")
+
+        super().__init__(
+            type_=type_,
             pk=pk,
             init=init,
             default=default,
@@ -203,7 +300,7 @@ class TupleModelField(TupleField[Model_co]):
             depends_on=depends_on,
             frozen=frozen,
             setter=setter,
-            repr=repr
+            repr=repr,
         )
 
 
@@ -230,5 +327,5 @@ class FrozenSetModelField(FrozenSetField[Model_co]):
             depends_on=depends_on,
             frozen=frozen,
             setter=setter,
-            repr=repr
+            repr=repr,
         )

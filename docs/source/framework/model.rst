@@ -42,6 +42,9 @@ All model attributes should be declared as fields. Fields tell **restio** how to
 - IntField
 - StrField
 - BoolField
+- FloatField
+- UUIDField
+- EnumField
 - TupleField
 - FrozenSetField
 - ModelField
@@ -330,6 +333,7 @@ Iterable fields cannot be primary keys. Typically, the field types below will be
 
 - IntField
 - StrField
+- UUIDField
 
 
 Relational fields

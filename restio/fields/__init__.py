@@ -1,6 +1,8 @@
 from restio.fields.base import ContainerField, Field, IterableField
 from restio.fields.typed import (
     BoolField,
+    EnumField,
+    FloatField,
     FrozenSetField,
     FrozenSetModelField,
     FrozenType,
@@ -9,6 +11,7 @@ from restio.fields.typed import (
     StrField,
     TupleField,
     TupleModelField,
+    UUIDField,
 )
 
 __all__ = (
@@ -18,6 +21,9 @@ __all__ = (
     "IntField",
     "StrField",
     "BoolField",
+    "FloatField",
+    "UUIDField",
+    "EnumField",
     "TupleField",
     "FrozenSetField",
     "ModelField",
