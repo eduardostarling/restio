@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import itertools
+from enum import IntEnum
 from typing import Any, Dict
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 
 from restio.event import EventListener
 from restio.fields import (
     BoolField,
+    EnumField,
+    FloatField,
     FrozenSetField,
     FrozenSetModelField,
     IntField,
@@ -15,71 +19,85 @@ from restio.fields import (
     StrField,
     TupleField,
     TupleModelField,
+    UUIDField,
 )
 from restio.model import MODEL_UPDATE_EVENT, BaseModel, ModelMeta
 
-
-class ModelSinglePKInt(BaseModel):
-    id: IntField = IntField(pk=True, allow_none=True)
-
-
-class ModelSinglePKStr(BaseModel):
-    id: StrField = StrField(pk=True, allow_none=True)
-
-
-class ModelDoublePKIntStr(BaseModel):
-    id: IntField = IntField(pk=True, allow_none=True)
-    key: StrField = StrField(pk=True, allow_none=True)
-
-
-class ModelDoublePKStrInt(BaseModel):
-    key: StrField = StrField(pk=True, allow_none=True)
-    id: IntField = IntField(pk=True, allow_none=True)
+default_uuid = UUID("31c6b6f9-bb10-4254-b0a5-77caa238933e")
+default_uuid2 = UUID("3d88baf6-d52c-413e-8e03-9fcd730dde5e")
 
 
 class TestModelPrimaryKeys:
-    def test_primary_key_int(self):
-        single_int = ModelSinglePKInt()
-        single_int.id = 1
 
-        assert single_int.id == 1
-        assert single_int.primary_keys == dict(id=1)
+    _pk_params = [
+        (IntField, 1),
+        (StrField, "a"),
+        (UUIDField, default_uuid),
+    ]
 
-    def test_primary_key_str(self):
-        single_str = ModelSinglePKStr()
-        single_str.id = "1"
+    @pytest.mark.parametrize("field_type, value", _pk_params)
+    def test_primary_key_types(self, field_type, value):
+        class Model(BaseModel):
+            pk = field_type(pk=True)
 
-        assert single_str.id == "1"
-        assert single_str.primary_keys == dict(id="1")
+        model = Model(pk=value)
 
-    def test_primary_key_double_int_str(self):
-        double_is = ModelDoublePKIntStr()
-        double_is.id, double_is.key = 1, "2"
+        assert model.pk == value
+        assert model.primary_keys == dict(pk=value)
 
-        assert double_is.id == 1
-        assert double_is.key == "2"
-        assert double_is.primary_keys == dict(id=1, key="2")
+    _compound_pk_params = itertools.product(_pk_params, _pk_params)
 
-    def test_primary_key_double_str_int(self):
-        double_si = ModelDoublePKStrInt()
-        double_si.key, double_si.id = "1", 2
+    @pytest.mark.parametrize("field_1, field_2", _compound_pk_params)
+    def test_compound_primary_key_types(self, field_1, field_2):
+        field_type1, value1 = field_1
+        field_type2, value2 = field_2
 
-        assert double_si.key == "1"
-        assert double_si.id == 2
-        assert double_si.primary_keys == dict(key="1", id=2)
+        class Model(BaseModel):
+            pk1 = field_type1(pk=True)
+            pk2 = field_type2(pk=True)
 
-    def test_primary_key_set_error(self):
-        single_int = ModelSinglePKInt()
+        model = Model(pk1=value1, pk2=value2)
+
+        assert model.pk1 == value1
+        assert model.pk2 == value2
+        assert model.primary_keys == dict(pk1=value1, pk2=value2)
+
+    @pytest.mark.parametrize(
+        "field_type, value",
+        [(IntField, 1.0), (StrField, 1), (UUIDField, str(default_uuid)),],
+    )
+    def test_primary_key_set_error(self, field_type, value):
+        class Model(BaseModel):
+            pk = field_type(pk=True)
+
         with pytest.raises(TypeError, match="should be of type"):
-            single_int.id = "1"
+            model = Model(pk=value)
 
-        single_int.id = 2
-        assert single_int.id == 2
-        assert single_int.primary_keys == dict(id=2)
+    @pytest.mark.parametrize(
+        "field_type, value1, value2",
+        [
+            (IntField, 1, 2),
+            (StrField, "a", "b"),
+            (UUIDField, default_uuid, default_uuid2),
+        ],
+    )
+    def test_primary_key_set_twice(self, field_type, value1, value2):
+        class Model(BaseModel):
+            pk = field_type(pk=True)
 
-        single_int.id = 3
-        assert single_int.id == 3
-        assert single_int.primary_keys == dict(id=3)
+        model = Model(pk=value1)
+        assert model.pk == value1
+        assert model.primary_keys == dict(pk=value1)
+
+        model.pk = value2
+        assert model.pk == value2
+        assert model.primary_keys == dict(pk=value2)
+
+
+class IntEnumType(IntEnum):
+    A = 1
+    B = 2
+    C = 3
 
 
 class ModelA(BaseModel):
@@ -89,6 +107,9 @@ class ModelA(BaseModel):
     c: TupleField = TupleField(str, default_factory=tuple)
     d: FrozenSetField = FrozenSetField(int, default_factory=frozenset)
     e: BoolField = BoolField(default=False)
+    f: FloatField = FloatField(default=0.0)
+    g: UUIDField = UUIDField(default=default_uuid)
+    h: EnumField = EnumField(IntEnumType, default=IntEnumType.A)
 
 
 class ModelB(BaseModel):
@@ -266,6 +287,9 @@ class TestModel:
             int_field = IntField()
             str_field = StrField()
             bool_field = BoolField()
+            float_field = FloatField()
+            uuid_field = UUIDField()
+            enum_field = EnumField(IntEnumType)
             tuple_field = TupleField(str)
             set_field = FrozenSetField(int)
             model_field = ModelField(ModelA)
@@ -279,6 +303,9 @@ class TestModel:
             "int_field",
             "str_field",
             "bool_field",
+            "float_field",
+            "uuid_field",
+            "enum_field",
             "tuple_field",
             "set_field",
             "model_field",
@@ -291,7 +318,17 @@ class TestModel:
         [
             (
                 default_model,
-                {"id": 0, "a": 0, "b": "", "c": tuple(), "d": frozenset(), "e": False},
+                {
+                    "id": 0,
+                    "a": 0,
+                    "b": "",
+                    "c": tuple(),
+                    "d": frozenset(),
+                    "e": False,
+                    "f": 0.0,
+                    "g": default_uuid,
+                    "h": IntEnumType.A,
+                },
                 {},
             ),
             (ModelB(), {"ref": None, "c": ""}, {"ref": None}),
@@ -313,6 +350,9 @@ class TestModel:
             (IntField, 1),
             (StrField, "a"),
             (BoolField, True),
+            (FloatField, 1.0),
+            (UUIDField, default_uuid),
+            (lambda default: EnumField(IntEnumType, default=default), IntEnumType.A),
             (lambda default: TupleField(int, default_factory=default), lambda: (1, 2)),
             (
                 lambda default: FrozenSetField(str, default_factory=default),

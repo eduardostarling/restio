@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+from enum import IntEnum
+from uuid import UUID, uuid4
+
 import pytest
 
 from restio.fields import (
     BoolField,
+    EnumField,
+    FloatField,
     FrozenSetField,
     FrozenSetModelField,
     IntField,
@@ -11,9 +16,16 @@ from restio.fields import (
     StrField,
     TupleField,
     TupleModelField,
+    UUIDField,
 )
 from restio.fields.base import Field, FrozenType
 from restio.model import BaseModel
+
+
+class IntEnumType(IntEnum):
+    A = 1
+    B = 2
+    C = 3
 
 
 class FieldsModel(BaseModel):
@@ -23,6 +35,8 @@ class FieldsModel(BaseModel):
 
 
 default_model = FieldsModel()
+default_uuid = UUID("6564d955-5fb9-4731-9452-2e0a49a46243")
+default_uuid2 = UUID("f4135fa3-ec79-45aa-a6e4-f5470eca9e01")
 
 
 class TestFields:
@@ -51,12 +65,19 @@ class TestFields:
         with pytest.raises(ValueError, match="default value not"):
             BaseFieldModel()
 
+    def test_enum_field_wrong_type(self):
+        with pytest.raises(TypeError):
+            EnumField(int)  # type: ignore
+
     @pytest.mark.parametrize(
         "field_type, value",
         [
             (IntField(), "a"),
             (StrField(), 5),
             (BoolField(), "a"),
+            (FloatField(), 1),
+            (UUIDField(), "6564d955-5fb9-4731-9452-2e0a49a46243"),
+            (EnumField(IntEnumType), 1),
             (TupleField(int), ["a"]),
             (FrozenSetField(str), {"b"}),
             (ModelField(FieldsModel), "s"),
@@ -77,6 +98,9 @@ class TestFields:
             (IntField, 1),
             (StrField, "a"),
             (BoolField, True),
+            (FloatField, 1.0),
+            (UUIDField, default_uuid),
+            (lambda default: EnumField(IntEnumType, default=default), IntEnumType.A),
             (lambda default: TupleField(int, default_factory=default), lambda: (1, 2)),
             (
                 lambda default: FrozenSetField(str, default_factory=default),
@@ -106,6 +130,9 @@ class TestFields:
             IntField(),
             StrField(),
             BoolField(),
+            FloatField(),
+            UUIDField(),
+            EnumField(IntEnumType),
             TupleField(int),
             FrozenSetField(str),
             TupleModelField(FieldsModel),
@@ -125,6 +152,9 @@ class TestFields:
             IntField,
             StrField,
             BoolField,
+            FloatField,
+            UUIDField,
+            lambda **args: EnumField(IntEnumType, **args),
             lambda **args: ModelField(FieldsModel, **args),
         ],
     )
@@ -142,6 +172,9 @@ class TestFields:
             (IntField, 1),
             (StrField, "a"),
             (BoolField, True),
+            (FloatField, 1.0),
+            (UUIDField, default_uuid),
+            (lambda **args: EnumField(IntEnumType, **args), IntEnumType.A),
             (lambda **args: ModelField(FieldsModel, **args), default_model),
         ],
     )
@@ -157,6 +190,17 @@ class TestFields:
         (lambda **kwargs: IntField(default=0, **kwargs), 1, 2),
         (lambda **kwargs: StrField(default="", **kwargs), "a", "b"),
         (lambda **kwargs: BoolField(default=False, **kwargs), False, True),
+        (lambda **kwargs: FloatField(default=0.0, **kwargs), 1.0, 2.0),
+        (
+            lambda **kwargs: UUIDField(default_factory=uuid4, **kwargs),
+            default_uuid,
+            default_uuid2,
+        ),
+        (
+            lambda **kwargs: EnumField(IntEnumType, default=IntEnumType.A, **kwargs),
+            IntEnumType.B,
+            IntEnumType.C,
+        ),
         (lambda **kwargs: TupleField(int, default_factory=tuple, **kwargs), (1,), (2,)),
         (
             lambda **kwargs: FrozenSetField(str, default_factory=frozenset, **kwargs),

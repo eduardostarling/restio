@@ -1,6 +1,12 @@
 Changelog
 =========
 
+1.0.0b4
+-------
+
+- Added new field types :code:`FloatField`, :code:`UUIDField` and :code:`EnumField`.
+
+
 1.0.0b3
 -------
 
