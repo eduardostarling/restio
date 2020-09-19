@@ -172,3 +172,4 @@ jobs:
           tagPattern: '[0-9]+.[0-9]+.[0-9]+\S*'
           tag: $(tagVersion)
           isPreRelease: $(isPreRelease)
+          title: $(tagVersion)
