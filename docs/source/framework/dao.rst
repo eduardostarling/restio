@@ -175,7 +175,7 @@ A complete implementation of the :code:`EmployeeDAO` and :code:`ClientAPI` for a
         api = ClientAPI()
 
         # Employee only contains one pk `key`, so it must be an argument
-        async def get(self, *, key: str) -> Employee:
+        async def get(self, *, key: int) -> Employee:
             employee_data = await self.api.get_employee(key)
             return self._map_from_dict(employee_data)
 
