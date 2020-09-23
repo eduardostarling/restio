@@ -99,7 +99,7 @@ class Employee(BaseModel):
 class EmployeeDAO(BaseDAO[Employee]):
     api = ClientAPI()
 
-    async def get(self, *, key: str) -> Employee:
+    async def get(self, *, key: int) -> Employee:
         key, = pks  # Employee only contains one pk
 
         employee_data = await self.api.get_employee(key)
