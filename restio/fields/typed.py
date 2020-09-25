@@ -28,6 +28,7 @@ class IntField(Field[int]):
         frozen: FrozenType = FrozenType.NEVER,
         setter: Optional[SetterType] = None,
         repr: bool = True,
+        type_check: bool = True,
     ) -> None:
         super().__init__(
             type_=int,
@@ -40,6 +41,7 @@ class IntField(Field[int]):
             frozen=frozen,
             setter=setter,
             repr=repr,
+            type_check=type_check,
         )
 
 
@@ -55,6 +57,7 @@ class StrField(Field[str]):
         frozen: FrozenType = FrozenType.NEVER,
         setter: Optional[SetterType] = None,
         repr: bool = True,
+        type_check: bool = True,
     ) -> None:
         super().__init__(
             type_=str,
@@ -67,6 +70,7 @@ class StrField(Field[str]):
             frozen=frozen,
             setter=setter,
             repr=repr,
+            type_check=type_check,
         )
 
 
@@ -82,6 +86,7 @@ class BoolField(Field[bool]):
         frozen: FrozenType = FrozenType.NEVER,
         setter: Optional[SetterType] = None,
         repr: bool = True,
+        type_check: bool = True,
     ) -> None:
         super().__init__(
             type_=bool,
@@ -94,6 +99,7 @@ class BoolField(Field[bool]):
             frozen=frozen,
             setter=setter,
             repr=repr,
+            type_check=type_check,
         )
 
 
@@ -109,6 +115,7 @@ class FloatField(Field[float]):
         frozen: FrozenType = FrozenType.NEVER,
         setter: Optional[SetterType] = None,
         repr: bool = True,
+        type_check: bool = True,
     ) -> None:
         super().__init__(
             type_=float,
@@ -121,6 +128,7 @@ class FloatField(Field[float]):
             frozen=frozen,
             setter=setter,
             repr=repr,
+            type_check=type_check,
         )
 
 
@@ -138,6 +146,7 @@ class UUIDField(Field[uuid.UUID]):
         frozen: FrozenType = FrozenType.NEVER,
         setter: Optional[SetterType] = None,
         repr: bool = True,
+        type_check: bool = True,
     ) -> None:
         super().__init__(
             type_=uuid.UUID,
@@ -150,6 +159,7 @@ class UUIDField(Field[uuid.UUID]):
             frozen=frozen,
             setter=setter,
             repr=repr,
+            type_check=type_check,
         )
 
 
@@ -171,6 +181,7 @@ class EnumField(Field[EnumType], Generic[EnumType]):
         frozen: FrozenType = FrozenType.NEVER,
         setter: Optional[SetterType] = None,
         repr: bool = True,
+        type_check: bool = True,
     ) -> None:
         if not issubclass(type_, enum.Enum):
             raise TypeError("FieldEnum provided type must be a subclass of enum.Enum.")
@@ -186,6 +197,7 @@ class EnumField(Field[EnumType], Generic[EnumType]):
             frozen=frozen,
             setter=setter,
             repr=repr,
+            type_check=type_check,
         )
 
 
@@ -203,6 +215,7 @@ class TupleField(IterableField[Tuple[SubT, ...], SubT]):
         frozen: FrozenType = FrozenType.NEVER,
         setter: Optional[SetterType] = None,
         repr: bool = True,
+        type_check: bool = True,
     ) -> None:
         super().__init__(
             type_=tuple,
@@ -215,6 +228,7 @@ class TupleField(IterableField[Tuple[SubT, ...], SubT]):
             frozen=frozen,
             setter=setter,
             repr=repr,
+            type_check=type_check,
         )
 
 
@@ -232,6 +246,7 @@ class FrozenSetField(IterableField[FrozenSet[SubT], SubT]):
         frozen: FrozenType = FrozenType.NEVER,
         setter: Optional[SetterType] = None,
         repr: bool = True,
+        type_check: bool = True,
     ) -> None:
         super().__init__(
             type_=frozenset,
@@ -244,6 +259,7 @@ class FrozenSetField(IterableField[FrozenSet[SubT], SubT]):
             frozen=frozen,
             setter=setter,
             repr=repr,
+            type_check=type_check,
         )
 
 
@@ -262,6 +278,7 @@ class ModelField(Field[Model_co]):
         frozen: FrozenType = FrozenType.NEVER,
         setter: Optional[SetterType] = None,
         repr: bool = True,
+        type_check: bool = True,
     ) -> None:
         super().__init__(
             type_=model_type,
@@ -274,6 +291,7 @@ class ModelField(Field[Model_co]):
             frozen=frozen,
             setter=setter,
             repr=repr,
+            type_check=type_check,
         )
 
 
@@ -291,6 +309,7 @@ class TupleModelField(TupleField[Model_co]):
         frozen: FrozenType = FrozenType.NEVER,
         setter: Optional[SetterType] = None,
         repr: bool = True,
+        type_check: bool = True,
     ) -> None:
         super().__init__(
             sub_type=model_type,
@@ -301,6 +320,7 @@ class TupleModelField(TupleField[Model_co]):
             frozen=frozen,
             setter=setter,
             repr=repr,
+            type_check=type_check,
         )
 
 
@@ -318,6 +338,7 @@ class FrozenSetModelField(FrozenSetField[Model_co]):
         frozen: FrozenType = FrozenType.NEVER,
         setter: Optional[SetterType] = None,
         repr: bool = True,
+        type_check: bool = True,
     ) -> None:
         super().__init__(
             sub_type=model_type,
@@ -328,4 +349,5 @@ class FrozenSetModelField(FrozenSetField[Model_co]):
             frozen=frozen,
             setter=setter,
             repr=repr,
+            type_check=type_check,
         )

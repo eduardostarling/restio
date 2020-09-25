@@ -59,6 +59,7 @@ class Field(Generic[T_co], object):
     depends_on: bool
     frozen: FrozenType
     repr: bool
+    type_check: bool
 
     _default: Optional[T_co]
     _default_factory: Optional[Callable[[], T_co]]
@@ -77,6 +78,7 @@ class Field(Generic[T_co], object):
         default_factory: Union[Optional[Callable[[], T_co]], Type[MISSING]] = MISSING,
         setter: Optional[SetterType] = None,
         repr: bool = True,
+        type_check: bool = True,
     ):
         if default is MISSING and default_factory is MISSING:
             if allow_none:
@@ -98,6 +100,7 @@ class Field(Generic[T_co], object):
         self.frozen = frozen
         self.setter(setter)
         self.repr = repr
+        self.type_check = type_check
 
     def __set_name__(self, owner, name: str):
         self.name = name
@@ -130,9 +133,13 @@ class Field(Generic[T_co], object):
             instance.__dict__[self.name] = default
 
     def _check_value(self, instance: "BaseModel", value: T_co) -> T_co:
-        _check_field_value_type(
-            self.type_, self._field_name(instance), value, allow_none=self.allow_none
-        )
+        if self.type_check:
+            _check_field_value_type(
+                self.type_,
+                self._field_name(instance),
+                value,
+                allow_none=self.allow_none,
+            )
         return self._setter(instance, value) if self._setter is not None else value
 
     @property
@@ -208,6 +215,7 @@ class ContainerField(Field[T_co], Generic[T_co, SubT]):
         default_factory: Union[Optional[Callable[[], T_co]], Type[MISSING]] = MISSING,
         setter: Optional[SetterType] = None,
         repr: bool = True,
+        type_check: bool = True,
     ) -> None:
         super().__init__(
             type_=type_,
@@ -220,11 +228,13 @@ class ContainerField(Field[T_co], Generic[T_co, SubT]):
             frozen=frozen,
             setter=setter,
             repr=repr,
+            type_check=type_check,
         )
         self.sub_type = sub_type
 
     def _check_sub_value(self, sub_value: SubT):
-        _check_field_value_type(self.sub_type, self.name, sub_value)
+        if self.type_check:
+            _check_field_value_type(self.sub_type, self.name, sub_value)
 
 
 class IterableField(ContainerField[T_co, SubT]):
@@ -241,6 +251,7 @@ class IterableField(ContainerField[T_co, SubT]):
         default_factory: Union[Optional[Callable[[], T_co]], Type[MISSING]] = MISSING,
         setter: Optional[SetterType] = None,
         repr: bool = True,
+        type_check: bool = True,
     ) -> None:
         super().__init__(
             type_=type_,
@@ -254,10 +265,12 @@ class IterableField(ContainerField[T_co, SubT]):
             frozen=frozen,
             setter=setter,
             repr=repr,
+            type_check=type_check,
         )
 
     def _check_value(self, instance: "BaseModel", value: SubT):
-        value = super()._check_value(instance, value)
-        for item in value:
-            super()._check_sub_value(item)
+        if self.type_check:
+            value = super()._check_value(instance, value)
+            for item in value:
+                super()._check_sub_value(item)
         return value

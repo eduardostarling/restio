@@ -188,13 +188,13 @@ Failing to assigning a value to a field before the instantiation finishes will r
 Runtime type-checking
 ^^^^^^^^^^^^^^^^^^^^^
 
-Runtime type-checking is done during value assignment.
+Runtime type-checking is done during value assignment when fields have been set with :code:`type_check=True` (default).
 
 The base type :code:`Field` accepts the type parameter :code:`type_` in its contructor, and this is used for data validation. All pre-defined types from **restio** already provide this by default (e.g. :code:`IntField` is constructed with :code:`type_=int`, :code:`StrField` with :code:`type_=str`, etc).
 
 A :code:`ContainerField` subtype will also check for the types of the objects stored in the container. For example, a :code:`TupleField(sub_type=str)` (or simply :code:`TupleField(str)`) will only accept tuples in which all values are of the type :code:`str`.
 
-Most fields will not accept :code:`None` unless explicitly defined with :code:`allow_none=True`.
+Most fields will not accept :code:`None` unless explicitly defined with :code:`allow_none=True`. :code:`type_check=False` also disables the check for :code:`None`.
 
 Example:
 
@@ -445,6 +445,14 @@ Or after getting:
     one_more_employee = await transaction.get(Employee, "key_value")
     one_more_employee.key  # key_value
     one_more_employee.key = "other_key"  # error, key cannot be modified
+
+
+Custom field types
+^^^^^^^^^^^^^^^^^^
+
+The generic base type :code:`Field` can be directly used in a model or extended in a new :code:`Field` subclass, as long as the parameters :code:`type_`, :code:`pk`, :code:`allow_none`, :code:`depends_on`, and :code:`frozen` are explicitly provided to :code:`Field`'s constructor.
+
+
 
 .. _model_meta:
 
