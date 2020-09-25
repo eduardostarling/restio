@@ -5,6 +5,7 @@ Changelog
 -------
 
 - Added new field types :code:`FloatField`, :code:`UUIDField` and :code:`EnumField`.
+- Added :code:`type_check` flag to :code:`Field` to allow disabling runtime type-checking for the field. All fields will still have type-checking enabled by default (:code:`type_check=True`), making this a backwards-compatible change.
 
 
 1.0.0b3

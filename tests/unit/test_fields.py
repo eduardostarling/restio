@@ -69,28 +69,33 @@ class TestFields:
         with pytest.raises(TypeError):
             EnumField(int)  # type: ignore
 
+    @pytest.mark.parametrize("type_check", [True, False])
     @pytest.mark.parametrize(
         "field_type, value",
         [
-            (IntField(), "a"),
-            (StrField(), 5),
-            (BoolField(), "a"),
-            (FloatField(), 1),
-            (UUIDField(), "6564d955-5fb9-4731-9452-2e0a49a46243"),
-            (EnumField(IntEnumType), 1),
-            (TupleField(int), ["a"]),
-            (FrozenSetField(str), {"b"}),
-            (ModelField(FieldsModel), "s"),
-            (TupleModelField(FieldsModel), ["a"]),
-            (FrozenSetModelField(FieldsModel), {"b"}),
+            (IntField, "a"),
+            (StrField, 5),
+            (BoolField, "a"),
+            (FloatField, 1),
+            (UUIDField, "6564d955-5fb9-4731-9452-2e0a49a46243"),
+            (lambda **kwargs: EnumField(IntEnumType, **kwargs), 1),
+            (lambda **kwargs: TupleField(int, **kwargs), ["a"]),
+            (lambda **kwargs: FrozenSetField(str, **kwargs), {"b"}),
+            (lambda **kwargs: ModelField(FieldsModel, **kwargs), "s"),
+            (lambda **kwargs: TupleModelField(FieldsModel, **kwargs), ["a"]),
+            (lambda **kwargs: FrozenSetModelField(FieldsModel, **kwargs), {"b"}),
         ],
     )
-    def test_set_field_invalid_value(self, field_type, value):
+    def test_set_field_invalid_value(self, type_check, field_type, value):
         class Model(BaseModel):
-            field = field_type
+            field = field_type(type_check=type_check)
 
-        with pytest.raises(TypeError, match="should be of type"):
-            Model(field=value)
+        if type_check:
+            with pytest.raises(TypeError, match="should be of type"):
+                Model(field=value)
+        else:
+            m = Model(field=value)
+            assert m.field == value
 
     @pytest.mark.parametrize(
         "field_type, default",
@@ -124,27 +129,32 @@ class TestFields:
 
         assert field.default == default() if callable(default) else default
 
+    @pytest.mark.parametrize("type_check", [True, False])
     @pytest.mark.parametrize(
         "field_type",
         [
-            IntField(),
-            StrField(),
-            BoolField(),
-            FloatField(),
-            UUIDField(),
-            EnumField(IntEnumType),
-            TupleField(int),
-            FrozenSetField(str),
-            TupleModelField(FieldsModel),
-            FrozenSetModelField(FieldsModel),
+            IntField,
+            StrField,
+            BoolField,
+            FloatField,
+            UUIDField,
+            lambda **kwargs: EnumField(IntEnumType, **kwargs),
+            lambda **kwargs: TupleField(int, **kwargs),
+            lambda **kwargs: FrozenSetField(str, **kwargs),
+            lambda **kwargs: TupleModelField(FieldsModel, **kwargs),
+            lambda **kwargs: FrozenSetModelField(FieldsModel, **kwargs),
         ],
     )
-    def test_set_field_none(self, field_type):
+    def test_set_field_none(self, type_check, field_type):
         class Model(BaseModel):
-            field = field_type
+            field = field_type(type_check=type_check)
 
-        with pytest.raises(TypeError, match="should be of type"):
-            Model(field=None)
+        if type_check:
+            with pytest.raises(TypeError, match="should be of type"):
+                Model(field=None)
+        else:
+            m = Model(field=None)
+            assert m.field is None
 
     @pytest.mark.parametrize(
         "field_type",
@@ -154,8 +164,8 @@ class TestFields:
             BoolField,
             FloatField,
             UUIDField,
-            lambda **args: EnumField(IntEnumType, **args),
-            lambda **args: ModelField(FieldsModel, **args),
+            lambda **kwargs: EnumField(IntEnumType, **kwargs),
+            lambda **kwargs: ModelField(FieldsModel, **kwargs),
         ],
     )
     def test_default_none_when_allow_none(self, field_type):
@@ -174,8 +184,8 @@ class TestFields:
             (BoolField, True),
             (FloatField, 1.0),
             (UUIDField, default_uuid),
-            (lambda **args: EnumField(IntEnumType, **args), IntEnumType.A),
-            (lambda **args: ModelField(FieldsModel, **args), default_model),
+            (lambda **kwargs: EnumField(IntEnumType, **kwargs), IntEnumType.A),
+            (lambda **kwargs: ModelField(FieldsModel, **kwargs), default_model),
         ],
     )
     def test_default_not_none_when_allow_none(self, field_type, expected_value):
