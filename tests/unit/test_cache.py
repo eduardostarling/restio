@@ -16,14 +16,14 @@ class Model(BaseModel):
 
 
 @query
-async def SimpleQuery(*, transaction) -> Tuple[Model, ...]:
+async def SimpleQuery(*, session) -> Tuple[Model, ...]:
     m1 = Model(id_=1)
     m2 = Model(id_=2)
     return (m1, m2)
 
 
 @query
-async def ArgsQuery(arg1: int, arg2: int = 2, *, transaction) -> List[BaseModel]:
+async def ArgsQuery(arg1: int, arg2: int = 2, *, session) -> List[BaseModel]:
     m1 = Model(id_=arg1)
     m2 = Model(id_=arg2)
     return [m1, m2]
@@ -133,17 +133,17 @@ class TestQueryCache:
     @pytest.fixture
     async def query_simple(self):
         q = SimpleQuery()
-        return q, await q("transaction")  # type: ignore
+        return q, await q("session")  # type: ignore
 
     @pytest.fixture
     async def query_args_first(self):
         q = ArgsQuery(5, 6)
-        return q, await q("transaction")  # type: ignore
+        return q, await q("session")  # type: ignore
 
     @pytest.fixture
     async def query_args_second(self):
         q = ArgsQuery(5, 7)
-        return q, await q("transaction")  # type: ignore
+        return q, await q("session")  # type: ignore
 
     def test_init(self, cache):
         assert cache._cache == {}

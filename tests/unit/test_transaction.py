@@ -22,8 +22,8 @@ from restio.fields.base import FrozenType
 from restio.graph import DependencyGraph, NavigationType
 from restio.model import MODEL_PRE_UPDATE_EVENT, MODEL_UPDATE_EVENT, BaseModel
 from restio.query import query
+from restio.session import PersistencyStrategy, Session, SessionException
 from restio.state import ModelState
-from restio.transaction import PersistencyStrategy, Transaction, TransactionException
 
 
 class ModelA(BaseModel):
@@ -78,9 +78,9 @@ class ModelFrozenDAO(BaseDAO):
             for v in self.value:
                 if not isinstance(v, BaseModel):
                     continue
-                self.transaction.register_model(v)
+                self.session.register_model(v)
         elif isinstance(self.value, BaseModel):
-            self.transaction.register_model(self.value)
+            self.session.register_model(self.value)
 
     async def _method(self, obj: BaseModel):
         self._register_children()
@@ -99,20 +99,20 @@ class ModelFrozenDAO(BaseDAO):
 
 @query
 async def SimpleQuery(
-    query_arg: TestTransaction, a: ModelA, *, transaction
+    query_arg: TestSession, a: ModelA, *, session
 ) -> Tuple[ModelA, ...]:
     b = ModelA(key=2, v=22, ref=a)
     c = ModelA(key=3, v=33, ref=b)
 
-    assert isinstance(query_arg, TestTransaction)
-    assert isinstance(transaction, Transaction)
+    assert isinstance(query_arg, TestSession)
+    assert isinstance(session, Session)
 
     return a, b, c
 
 
 @query
 async def SimpleQueryRegister(
-    register: bool = False, a: Optional[ModelA] = None, *, transaction: Transaction
+    register: bool = False, a: Optional[ModelA] = None, *, session: Session
 ) -> Tuple[ModelA, ...]:
 
     if not a:
@@ -121,21 +121,21 @@ async def SimpleQueryRegister(
     c = ModelA(key=3, v=33, ref=b)
 
     if register:
-        transaction.register_model(a)
-        transaction.register_model(b)
+        session.register_model(a)
+        session.register_model(b)
 
     return (c,)
 
 
 @query
-async def SingleResultQuery(*, transaction: Transaction) -> Tuple[ModelA]:
+async def SingleResultQuery(*, session: Session) -> Tuple[ModelA]:
     return (ModelA(key=1),)
 
 
 @query
-async def EmptyQuery(query_arg: TestTransaction, *, transaction) -> Tuple[ModelA, ...]:
-    assert isinstance(query_arg, TestTransaction)
-    assert isinstance(transaction, Transaction)
+async def EmptyQuery(query_arg: TestSession, *, session) -> Tuple[ModelA, ...]:
+    assert isinstance(query_arg, TestSession)
+    assert isinstance(session, Session)
 
     return tuple()
 
@@ -227,10 +227,10 @@ def _get_all_frozen_fields_non_default(
         return fields
 
 
-class TestTransaction(ModelsFixture):
+class TestSession(ModelsFixture):
     @pytest.fixture
     def t(self):
-        return Transaction()
+        return Session()
 
     def test_init(self, t):
         assert t._model_cache._id_cache == set()
@@ -395,7 +395,7 @@ class TestTransaction(ModelsFixture):
         assert t._model_cache._key_cache == {}
         assert t._query_cache._cache == {}
 
-        # after reset, the transaction must try to call
+        # after reset, the session must try to call
         # the DAO since "a" has been cleared
         with pytest.raises(NotImplementedError):
             await t.get(ModelA, key=1)
@@ -543,7 +543,7 @@ class TestTransaction(ModelsFixture):
 
         class ModelADAO(BaseDAO):
             async def get(self, *, key: int):
-                assert self.transaction is not None
+                assert self.session is not None
 
                 if key == 1:
                     return a
@@ -963,10 +963,10 @@ class TestTransaction(ModelsFixture):
         b._state = ModelState.DELETED
 
         with pytest.raises(RuntimeError):
-            Transaction._check_deleted_models(models)
+            Session._check_deleted_models(models)
 
         c._state = ModelState.DELETED
-        Transaction._check_deleted_models(models)
+        Session._check_deleted_models(models)
 
     commit_iterations = itertools.product(
         [ModelState.NEW, ModelState.DIRTY, ModelState.CLEAN], repeat=6
@@ -1028,7 +1028,7 @@ class TestTransaction(ModelsFixture):
     async def test_commit_exception(self, models_complex):
         a, b, c, d, e, f = models = list(models_complex)
 
-        t = Transaction(strategy=PersistencyStrategy.INTERRUPT_ON_ERROR)
+        t = Session(strategy=PersistencyStrategy.INTERRUPT_ON_ERROR)
         t.register_dao(ModelDAOException(ModelA))
 
         f._state = ModelState.NEW
@@ -1046,7 +1046,7 @@ class TestTransaction(ModelsFixture):
             error_models,
             processed_models,
             not_processed_models,
-        ) = await self._process_transaction(t)
+        ) = await self._process_session(t)
 
         a_cache, b_cache, c_cache = [
             t._model_cache.is_registered_by_id(y) for y in (a, b, c)
@@ -1071,7 +1071,7 @@ class TestTransaction(ModelsFixture):
     ):
         a, *_ = models_complex
 
-        t = Transaction(strategy=PersistencyStrategy.INTERRUPT_ON_ERROR)
+        t = Session(strategy=PersistencyStrategy.INTERRUPT_ON_ERROR)
         t.register_dao(ModelDAOException(ModelA))
 
         a._state = state
@@ -1083,17 +1083,17 @@ class TestTransaction(ModelsFixture):
             tasks = await t.commit(raise_for_status=raise_for_status)
             assert any(t.task.exception() is not None for t in tasks)
         else:
-            with pytest.raises(TransactionException) as exc:
+            with pytest.raises(SessionException) as exc:
                 await t.commit(raise_for_status=raise_for_status)
             assert exc.value.exception_tasks
 
-    async def _process_transaction(self, transaction: Transaction):
+    async def _process_session(self, session: Session):
         error_models = set()
         processed_models = set()
-        all_models = transaction._model_cache.get_all_models()
+        all_models = session._model_cache.get_all_models()
 
-        with pytest.raises(TransactionException) as exc:
-            await transaction.commit()
+        with pytest.raises(SessionException) as exc:
+            await session.commit()
 
         for success_task in exc.value.sucessful_tasks:
             processed_models.add(success_task.model)
@@ -1106,13 +1106,13 @@ class TestTransaction(ModelsFixture):
 
     @pytest.mark.asyncio
     async def _check_exception_strategies(self, models, strategy, expected):
-        t = Transaction(strategy=strategy)
+        t = Session(strategy=strategy)
         t.register_dao(ModelDAOException(ModelA))
 
         for model in reversed(models):
             t.register_model(model)
 
-        error_models, processed_models, _ = await self._process_transaction(t)
+        error_models, processed_models, _ = await self._process_session(t)
 
         (
             expected_processed,

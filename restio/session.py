@@ -44,17 +44,17 @@ Model_co = TypeVar("Model_co", bound=BaseModel, covariant=True)
 
 class PersistencyStrategy(IntEnum):
     """
-    Defines the strategy of error handling during a Transaction `commit`.
+    Defines the strategy of error handling during a Session `commit`.
 
     - INTERRUPT_ON_ERROR (default):
-        The Transaction will be interrupted if any operation made by a DAO throws an
+        The Session will be interrupted if any operation made by a DAO throws an
         exception. The operations already performed will be persisted on local cache,
         and the on-going tasks in the other dependency trees will be finalized. The
         commit operation will hang until all running tasks finalize, then a list of all
         DAOTask's will be returned by the `commit`. This is the recommended approach.
 
     - CONTINUE_ON_ERROR:
-        The Transaction will continue processing all models in the dependency tree that
+        The Session will continue processing all models in the dependency tree that
         have been marked for modification. The framework will persist on local cache
         only the models that have been successfuly synchronized to the remote store. No
         cancellation will be done.
@@ -64,16 +64,16 @@ class PersistencyStrategy(IntEnum):
     CONTINUE_ON_ERROR = auto()
 
 
-class TransactionState(IntEnum):
+class SessionState(IntEnum):
     """
-    Stores the current state of the Transaction. The state is used by the Transaction
+    Stores the current state of the Session. The state is used by the Session
     scope for decision making when particular actions are being executed.
 
-    - STANDBY: The transaction has been created and is not performing any action.
-    - GET: The transaction is currently acquiring a model from the remote server.
-    - ADD: The transaction is currently adding a new model to the internal cache.
-    - COMMIT: The transaction is performing a commit.
-    - ROLLBACK: The transaction is performing a rollback.
+    - STANDBY: The session has been created and is not performing any action.
+    - GET: The session is currently acquiring a model from the remote server.
+    - ADD: The session is currently adding a new model to the internal cache.
+    - COMMIT: The session is performing a commit.
+    - ROLLBACK: The session is performing a rollback.
     """
 
     STANDBY = auto()
@@ -86,25 +86,25 @@ class TransactionState(IntEnum):
 T = TypeVar("T", bound=Callable[..., Any])
 
 
-def transactionstate(state: TransactionState) -> Callable[[T], T]:
+def sessionstate(state: SessionState) -> Callable[[T], T]:
     """
-    Decorates the current method to define the state of the transaction
+    Decorates the current method to define the state of the session
     during its execution.
 
     # noqa: DAR301 yield
 
-    :param state: The state to be set to the transaction while the operation
+    :param state: The state to be set to the session while the operation
                   is in place.
     :return: The function decorator.
     """
 
     @contextmanager
-    def _context(t: Transaction):
+    def _context(session: Session):
         try:
-            token = t._state.set(state)
+            token = session._state.set(state)
             yield
         finally:
-            t._state.reset(token)
+            session._state.reset(token)
 
     def deco(func: T) -> T:
         if not asyncio.iscoroutinefunction(func):
@@ -126,7 +126,7 @@ def transactionstate(state: TransactionState) -> Callable[[T], T]:
     return deco
 
 
-class TransactionException(BaseException):
+class SessionException(BaseException):
     """
     Raised when at least one Exception is raised by a DAOTask during a commit.
     """
@@ -145,37 +145,37 @@ class TransactionException(BaseException):
         self.sucessful_tasks = _successful_tasks
 
 
-class Transaction:
+class Session:
     """
-    Manages a local transaction scope for interfacing with a remote REST API server.
+    Manages a local session scope for interfacing with a remote REST API server.
 
-    The Transaction will manage an internal cache where it stores the models retrieved
+    The Session will manage an internal cache where it stores the models retrieved
     from or persisted to the remote REST API. Models are uniquely identified by their
     internal id and their primary keys. Trying to retrieve the same model twice within
-    the same scope will make the Transaction return the cached models instead of
-    querying the remote server again.
+    the same scope will make the Session return the cached models instead of querying
+    the remote server again.
 
-    When all models have been modified, created or deleted, the Transaction can be
+    When all models have been modified, created or deleted, the Session can be
     persisted on the remote server with `commit`.
 
-    The Transaction should know how to manipulate each model type by registering the
+    The Session should know how to manipulate each model type by registering the
     respective DAOs with `register_dao`. When asked to `get`, `add` or `remove` a
-    model, the Transaction will look up for the DAO associated with the provided model
-    type. If the DAO raises an exeption during `commit`, then the Transaction will
-    handle the erros based on the predefined PersistenceStrategy provided during
+    model, the Session will look up for the DAO associated with the provided model
+    type. If the DAO raises an exeption during `commit`, then the Session will handle
+    the erros based on the predefined PersistenceStrategy provided during
     instantiation.
 
     `get` operations will be executed on spot, while `add`, `remove` and `_update` will
-    be scheduled to run during `commit`. The Transaction will decide in which order to
-    manipulate each model based on dependency trees generated in runtime. The
-    Transaction will try to parallelize the calls to the remote server as much as
-    possible to guarantee data consistency. The dependency trees vary with the current
-    internal state of each model instance as soon as `commit` is called. The new state
-    of each model is managed by the Transaction itself during the commit.
+    be scheduled to run during `commit`. The Session will decide in which order to
+    manipulate each model based on dependency trees generated in runtime. The Session
+    will try to parallelize the calls to the remote server as much as possible to
+    guarantee data consistency. The dependency trees vary with the current internal
+    state of each model instance as soon as `commit` is called. The new state of each
+    model is managed by the Session itself during the commit.
 
-    When called by a Transaction, DAO instances are allowed to modify the models
-    locally during `get`, `add` or `update` without causing the models' states to
-    change, and without being affected by the defined frozen attribute of each field.
+    When called by a Session, DAO instances are allowed to modify the models locally
+    during `get`, `add` or `update` without causing the models' states to change, and
+    without being affected by the defined frozen attribute of each field.
 
     After a `commit` is done, all models that have been persisted on the remote server
     successfully will be persisted on the local cache, even if errors occur in other
@@ -186,7 +186,7 @@ class Transaction:
     _query_cache: QueryCache
     _daos: Dict[Type[BaseModel], BaseDAO]
     _strategy: PersistencyStrategy
-    _state: ContextVar[TransactionState]
+    _state: ContextVar[SessionState]
     _model_lock: Dict[str, asyncio.Lock]
 
     def __init__(
@@ -196,9 +196,7 @@ class Transaction:
         self._query_cache = QueryCache()
         self._daos = {}
         self._strategy = strategy
-        self._state = ContextVar(
-            "TransactionStateContext", default=TransactionState.STANDBY
-        )
+        self._state = ContextVar("SessionStateContext", default=SessionState.STANDBY)
         self._model_lock = {}
 
     def reset(self):
@@ -214,18 +212,18 @@ class Transaction:
         self._model_lock = {}
 
     @property
-    def state(self) -> TransactionState:
+    def state(self) -> SessionState:
         """
-        Returns the state in which the Transaction is within the current context.
+        Returns the state in which the Session is within the current context.
 
-        :return: The TransactionState set for the context.
+        :return: The SessionState set for the context.
         """
         return self._state.get()
 
     def register_dao(self, dao: BaseDAO[BaseModel]):
         """
-        Registers a DAO instance to the transaction and maps its model type in the
-        local dictionary.
+        Registers a DAO instance to the session and maps its model type in the local
+        dictionary.
 
         :param dao: The DAO instance.
         """
@@ -233,7 +231,7 @@ class Transaction:
 
         if model_type not in self._daos:
             self._daos[model_type] = dao
-            dao.transaction = self
+            dao.session = self
 
     def get_dao(self, model_type: Type[Model_co]) -> BaseDAO[Model_co]:
         """
@@ -253,7 +251,7 @@ class Transaction:
 
         return dao
 
-    @transactionstate(TransactionState.GET)
+    @sessionstate(SessionState.GET)
     async def get(self, model_type: Type[Model_co], **keys) -> Model_co:
         """
         Tries retrieving the model of type `model_type` and primary keys `keys` from
@@ -307,7 +305,7 @@ class Transaction:
         lock_hash = f"{model_type.__name__}/{str(keys_str)}"
         return self._model_lock.setdefault(lock_hash, asyncio.Lock())
 
-    @transactionstate(TransactionState.ADD)
+    @sessionstate(SessionState.ADD)
     def add(self, model: BaseModel):
         """
         Adds the new `model` to the local cache and schedules for adding in the remote
@@ -373,9 +371,9 @@ class Transaction:
         # During COMMIT, ROLLBACK and GET, all changes to models
         # should be allowed, regardless of the field being or not frozen
         if self.state in (
-            TransactionState.COMMIT,
-            TransactionState.ROLLBACK,
-            TransactionState.GET,
+            SessionState.COMMIT,
+            SessionState.ROLLBACK,
+            SessionState.GET,
         ):
             return
 
@@ -391,13 +389,13 @@ class Transaction:
             frozen_state = FrozenType.UPDATE
         elif model._state == ModelState.NEW:
             frozen_state = FrozenType.CREATE
-        elif self.state == TransactionState.ADD:
+        elif self.state == SessionState.ADD:
             frozen_state = FrozenType.CREATE
         else:  # DISCARDED
             return
 
         if field.frozen & frozen_state:  # type: ignore
-            if self.state == TransactionState.ADD:
+            if self.state == SessionState.ADD:
                 # this will kick in if a model is being registered to be added,
                 # but a frozen field has a value different from its default
                 field_value = model.fields[field.name]
@@ -425,7 +423,7 @@ class Transaction:
 
         # During ROLLBACK and GET, all changes to models should be permanent, therefore
         # we persist any change and avoid changing the state of the models
-        if self.state in (TransactionState.ROLLBACK, TransactionState.GET):
+        if self.state in (SessionState.ROLLBACK, SessionState.GET):
             model._persist()
             return False
 
@@ -450,7 +448,7 @@ class Transaction:
         model._state = new_state
         return updated
 
-    @transactionstate(TransactionState.GET)
+    @sessionstate(SessionState.GET)
     async def query(
         self, query: BaseQuery[Model_co], force: bool = False
     ) -> Tuple[Model_co, ...]:
@@ -511,7 +509,7 @@ class Transaction:
         if model._state == ModelState.DISCARDED:
             raise RuntimeError(
                 f"Model of id `{model._internal_id}` has been discarded and cannot be"
-                " registered again to a Transaction."
+                " registered again to a Session."
             )
 
         self._check_models_children({model}, recursive=True)
@@ -583,13 +581,13 @@ class Transaction:
 
         self._query_cache.register(query, registered_models)
 
-    @transactionstate(TransactionState.COMMIT)
+    @sessionstate(SessionState.COMMIT)
     async def commit(self, raise_for_status: bool = True) -> List[DAOTask]:
         """
         Persists all models on the remote server. Models that have been successfully
         submited are also persisted on the local cache by the end of the operation.
 
-        :param raise_for_status: The commit will raise a TransactionException if at
+        :param raise_for_status: The commit will raise a SessionException if at
                                  least one task executed in the commit raises an
                                  exception.
         :return: A list containing all DAOTask's performed by the commit, in the order
@@ -834,11 +832,11 @@ class Transaction:
     @staticmethod
     def raise_for_status(tasks: Iterable[DAOTask]):
         """
-        Raises a TransactionException if at least one resulting DAOTask from `tasks`
-        returned by Transaction.commit() contains an underlying exception raised.
+        Raises a SessionException if at least one resulting DAOTask from `tasks`
+        returned by Session.commit() contains an underlying exception raised.
 
-        :param tasks: The list of DAOTasks incoming from Transaction.commit()
-        :raises TransactionException: When at least one task has raised an exception.
+        :param tasks: The list of DAOTasks incoming from Session.commit()
+        :raises SessionException: When at least one task has raised an exception.
         """
         exception_tasks = []
         successful_tasks = []
@@ -850,9 +848,9 @@ class Transaction:
                 successful_tasks.append(task)
 
         if exception_tasks:
-            raise TransactionException(exception_tasks, successful_tasks)
+            raise SessionException(exception_tasks, successful_tasks)
 
-    @transactionstate(TransactionState.ROLLBACK)
+    @sessionstate(SessionState.ROLLBACK)
     def rollback(self):
         """
         Discards all changes from the local cache. New models are discarded and local

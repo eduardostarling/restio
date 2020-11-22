@@ -4,25 +4,25 @@ from typing import Dict, Tuple
 
 class ModelState(IntEnum):
     """
-    Contains the state of each model within a Transaction scope.
+    Contains the state of each model within a Session scope.
 
-    - UNBOUND indicates that the model is not bound to any Transaction.
+    - UNBOUND indicates that the model is not bound to any Session.
     - CLEAN indicates that the model has been retrieved from the remote server and has
     not been modified. CLEAN models are ignored during a `commit`.
-    - NEW indicates that the model has been created within the transaction scope, but
+    - NEW indicates that the model has been created within the session scope, but
     not yet exists on the remote server. During `commit`, the model will be passed by
-    the transaction to the DAO's `add` method.
+    the session to the DAO's `add` method.
     - DIRTY indicates that the model has been retrieved from the remote server but has
-    been modified within the Transaction scope. During `commit`, the model will be
-    passed by the transaction to the DAO's `update` method.
+    been modified within the Session scope. During `commit`, the model will be passed
+    by the session to the DAO's `update` method.
     - DELETED indicates that the model has been retrieved from the remote server but
-    has been deleted within the Transaction scope. During `commit`, the model will be
-    passed by the transaction to the DAO's `remove` method.
-    - DISCARDED indicates that the model has been discarded from the internal
-    Transaction cache and is ready to be cleared up.
+    has been deleted within the Session scope. During `commit`, the model will be
+    passed by the session to the DAO's `remove` method.
+    - DISCARDED indicates that the model has been discarded from the internal Session
+    cache and is ready to be cleared up.
 
-    The state management of models is done entirely by the Transaction instance and
-    stored as part of the model instance.
+    The state management of models is done entirely by the Session instance and stored
+    as part of the model instance.
     """
 
     UNBOUND = auto()
@@ -35,9 +35,8 @@ class ModelState(IntEnum):
 
 class Transition(IntEnum):
     """
-    Contains the possible transitions of an object within the Transaction scope. It is
-    used by the ModelStateMachine and Transaction to figure out the next state of an
-    object.
+    Contains the possible transitions of an object within the Session scope. It is used
+    by the ModelStateMachine and Session to figure out the next state of an object.
     """
 
     REGISTER_OBJECT = auto()
@@ -81,7 +80,7 @@ class ModelStateMachine:
         """
         Maps the Transition `transition` from `current_state` to a new ModelState.
 
-        :param transition: The Transition being made by the Transaction.
+        :param transition: The Transition being made by the Session.
         :param current_state: The current ModelState of the model.
         :return: The resulting model state after the transition.
         """

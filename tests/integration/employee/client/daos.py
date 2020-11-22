@@ -80,7 +80,7 @@ class CompanyDAO(BaseDAO[Company]):
 
     async def _load_company_employees(self, key: str) -> FrozenSet[Employee]:
         company_employees_query = self.get_company_employees(company_key=key)
-        employees: Tuple[Employee, ...] = await self.transaction.query(
+        employees: Tuple[Employee, ...] = await self.session.query(
             company_employees_query, force=True
         )
         return frozenset(employees)

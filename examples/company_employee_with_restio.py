@@ -8,7 +8,7 @@ from restio.dao import BaseDAO
 from restio.fields import FrozenSetModelField, FrozenType, IntField, StrField
 from restio.model import BaseModel
 from restio.query import query
-from restio.transaction import Transaction
+from restio.session import Session
 
 
 class Employee(BaseModel):
@@ -166,9 +166,9 @@ class CompanyDAO(BaseDAO[Company]):
         company_employees_query = self.get_company_employees(company_key=key)
         # this will not only retrieve all the company employees, but will also
         # register all the loaded employees to the cache - the `force` argument
-        # is used to tell the transaction to execute the query again, without
+        # is used to tell the session to execute the query again, without
         # replacing the models that are already in the cache
-        company_employees: Tuple[Employee, ...] = await self.transaction.query(
+        company_employees: Tuple[Employee, ...] = await self.session.query(
             company_employees_query, force=True
         )
 
@@ -178,7 +178,7 @@ class CompanyDAO(BaseDAO[Company]):
     @query
     @classmethod
     async def get_company_employees(
-        cls, company_key: str, *, transaction
+        cls, company_key: str, *, session
     ) -> FrozenSet[Employee]:
         employees_list = await api.get_company_employees(company_key)
         return frozenset(EmployeeDAO._from_dict(e) for e in employees_list)
@@ -232,25 +232,25 @@ class CompanyDAO(BaseDAO[Company]):
 
 
 async def main():
-    transaction = Transaction()
-    transaction.register_dao(EmployeeDAO(Employee))
-    transaction.register_dao(CompanyDAO(Company))
+    session = Session()
+    session.register_dao(EmployeeDAO(Employee))
+    session.register_dao(CompanyDAO(Company))
 
     # loads Joseph Tribiani
-    joseph = await transaction.get(Employee, key=1000)
+    joseph = await session.get(Employee, key=1000)
     # loads the Amazing Company A
-    company_a = await transaction.get(Company, key="COMPANY_A")
+    company_a = await session.get(Company, key="COMPANY_A")
 
     # updates Joseph Tribiani's address
     joseph.address = "New address"
 
     # hires Chandler Bing, that lives together with Joseph
     chandler = Employee(name="Chandler Bing", age=26, address=joseph.address)
-    transaction.add(chandler)
+    session.add(chandler)
 
     company_a.hire_employee(chandler)
 
-    await transaction.commit()
+    await session.commit()
 
 
 if __name__ == "__main__":
