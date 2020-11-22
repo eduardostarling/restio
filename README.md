@@ -41,7 +41,7 @@ import aiohttp
 from restio.dao import BaseDAO
 from restio.fields import FrozenSetModelField, IntField, StrField
 from restio.model import BaseModel
-from restio.transaction import Transaction
+from restio.session import Session
 
 
 # Model definition - this is where the relational data schema is defined
@@ -93,24 +93,24 @@ class EmployeeDAO(BaseDAO[Employee]):
         return dict(name=model.name, age=model.age, address=model.address)
 ```
 
-Once `Models` and `Data Access Objects` (DAOs) are provided, you can use `Transactions` to operate the `Models`:
+Once `Models` and `Data Access Objects` (DAOs) are provided, you can use `Sessions` to operate the `Models`:
 
 ```python
-# instantiate the Transaction and register the DAOs EmployeeDAO
+# instantiate the Session and register the DAOs EmployeeDAO
 # to deal with Employee models
-transaction = Transaction()
-transaction.register_dao(EmployeeDAO(Employee))
+session = Session()
+session.register_dao(EmployeeDAO(Employee))
 
 # retrieve John Doe's Employee model, that has a known primary key 1
-john = await transaction.get(Employee, 1)
-print(john) # Employee(key=1, name="John Doe", age=30, address="The Netherlands")
+john = await session.get(Employee, key=1)  # Employee(key=1, name="John Doe", age=30, address="The Netherlands")
+john.address = "Brazil"
 
 # create new Employees in local memory
 jay = Employee(name="Jay Pritchett", age=65, address="California")
 manny = Employee(name="Manuel Delgado", age=22, address="Florida")
-# tell the transaction to add the new employees to its context
-transaction.add(jay)
-transaction.add(manny)
+# tell the session to add the new employees to its context
+session.add(jay)
+session.add(manny)
 
 # persist all changes on the remote server
 await transaction.commit()

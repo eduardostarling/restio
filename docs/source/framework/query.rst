@@ -36,18 +36,18 @@ The :code:`EmployeeDAO` implemented at :ref:`dao` knows how to retrieve such mod
 
 What if we wish to retrieve a list of employees in one go, by their keys?
 
-Without a custom query, one could easily call :code:`Transaction.get` several times, for each employee key:
+Without a custom query, one could easily call :code:`Session.get` several times, for each employee key:
 
 .. code-block:: python
 
-    transaction = Transaction()
-    transaction.register_dao(EmployeeDAO(Employee))
+    session = Session()
+    session.register_dao(EmployeeDAO(Employee))
     ...
 
     keys = (1000, 1002, 1004, 1008)
-    employees = [await transaction.get(Employee, key=key) for key in keys]
+    employees = [await session.get(Employee, key=key) for key in keys]
 
-The issue with the above code is that the calls to :code:`Transaction.get` can be expensive, because they require sending an individual request to the remote server for each key in the tuple.
+The issue with the above code is that the calls to :code:`Session.get` can be expensive, because they require sending an individual request to the remote server for each key in the tuple.
 
 A much better approach could be to write a custom query that uses a readily-available endpoint that supports filtering:
 
@@ -74,18 +74,18 @@ It is now easy to retrieve the list of Employees by their keys:
 
 .. code-block:: python
 
-    transaction = Transaction()
-    transaction.register_dao(EmployeeDAO(Employee))
+    session = Session()
+    session.register_dao(EmployeeDAO(Employee))
     ...
 
     keys = (1000, 1002, 1004, 1008)
-    employees = await transaction.query(EmployeeDAO.get_with_filter(keys))
+    employees = await session.query(EmployeeDAO.get_with_filter(keys))
 
 
 Writing a query
 ---------------
 
-All **restio** query instances are `coroutine functions <https://docs.python.org/3/glossary.html#term-coroutine-function>`_ wrapped as an instance of :code:`restio.query.BaseQuery`. The decorator :code:`query` (imported from :code:`restio.query`) makes it easy to transform any function or method into a query that a :code:`Transaction` can understand.
+All **restio** query instances are `coroutine functions <https://docs.python.org/3/glossary.html#term-coroutine-function>`_ wrapped as an instance of :code:`restio.query.BaseQuery`. The decorator :code:`query` (imported from :code:`restio.query`) makes it easy to transform any function or method into a query that a :code:`Session` can understand.
 
 .. code-block:: python
 
@@ -96,14 +96,14 @@ All **restio** query instances are `coroutine functions <https://docs.python.org
         return [Model(arg1=arg1, arg2=arg2)]
 
     q = my_query(1, 2)  # BaseQuery instance
-    models = await transaction.query(q)  # (Model(arg1=1, arg2=2),)
+    models = await session.query(q)  # (Model(arg1=1, arg2=2),)
 
     print(models[0])    # Model(arg1=1, arg2=2)
 
 
-The query is executed only when injecting it into a :code:`Transaction.query()` instance call. This is to make sure that the returned models are properly registered in the cache of the :code:`Transaction`.
+The query is executed only when injecting it into a :code:`Session.query()` instance call. This is to make sure that the returned models are properly registered in the cache of the :code:`Session`.
 
-Queries should **always** return iterable types. The value is always stored and returned by the :code:`Transaction` as a :code:`tuple` (to guarantee that the order is preserved).
+Queries should **always** return iterable types. The value is always stored and returned by the :code:`Session` as a :code:`tuple` (to guarantee that the order is preserved).
 
 
 Query uniqueness
@@ -126,27 +126,27 @@ Two query instances are considered equal when:
 
 Query uniqueness is used for caching purposes.
 
-Calling :code:`Transaction.query()` for the same transaction instance, with the same query twice, will result in only one effective call to the query (the results from the second call are returned from the cache). One can force re-running the query again by calling :code:`Transaction.query()` with :code:`force=True`.
+Calling :code:`Session.query()` for the same session instance, with the same query twice, will result in only one effective call to the query (the results from the second call are returned from the cache). One can force re-running the query again by calling :code:`Session.query()` with :code:`force=True`.
 
 .. note::
     Using :code:`force=True` will not replace existing models that are already in cache. If the query returns a model with similar type and primary key, but different content, then the model stored in cache will overtake the model returned by the query. Please see :ref:`caching` for details.
 
 
-Injecting the Transaction instance
-----------------------------------
+Injecting the Session instance
+------------------------------
 
-:code:`BaseQuery` instances are independent from a :code:`Transaction` instance. However, in some cases it is useful to be able to access the current transaction from within the coroutine function itself.
+:code:`BaseQuery` instances are independent from a :code:`Session` instance. However, in some cases it is useful to be able to access the current session from within the coroutine function itself.
 
-A special argument :code:`transaction` can be used for that purpose:
+A special argument :code:`session` can be used for that purpose:
 
 .. code-block:: python
 
     @query
-    async def query_with_transaction(arg1, arg2, transaction) -> List[Model]:
-        print(arg1, arg2, transaction)
+    async def query_with_session(arg1, arg2, session) -> List[Model]:
+        print(arg1, arg2, session)
 
-    transaction = Transaction()
+    session = Session()
 
-    await transaction.query(query_with_transaction(1, 2))   # 1, 2, <restio.transaction.Transaction object at ...>
+    await session.query(query_with_session(1, 2))   # 1, 2, <restio.session.Session object at ...>
 
-**restio** automatically detects if the parameter :code:`transaction` is expected by the coroutine function, and injects it at runtime in such case.
+**restio** automatically detects if the parameter :code:`session` is expected by the coroutine function, and injects it at runtime in such case.
