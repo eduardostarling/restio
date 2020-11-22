@@ -39,43 +39,9 @@ import json
 import aiohttp
 
 from restio.dao import BaseDAO
+from restio.fields import FrozenSetModelField, IntField, StrField
+from restio.model import BaseModel
 from restio.transaction import Transaction
-
-
-# the raw client API, typically implemented by the client application
-# or provided as a third-party library by the API owner
-
-class ClientAPI:
-    session: aiohttp.ClientSession
-    url = "http://remote-rest-api-url"
-
-    def __init__(self):
-        self.session = aiohttp.ClientSession(raise_for_status=True)
-
-    async def get_employee(self, key: int) -> Dict[str, Any]:
-        employee_url = f"{self.url}/employees/{key}"
-        result = await self.session.get(employee_url)
-        return await result.json()
-
-    async def create_employee(self, employee: Dict[str, Any]) -> int:
-        employees_url = f"{self.url}/employees"
-        payload = json.dumps(employee)
-
-        response = await self.session.post(employees_url, data=payload.encode())
-
-        location = response.headers["Location"]
-        key = location.split("/")[-1]
-
-        return int(key)
-
-    async def update_employee(self, key: int, employee: Dict[str, Any]):
-        employee_url = f"{self.url}/employees/{key}"
-        payload = json.dumps(employee)
-        await self.session.put(employee_url, data=payload.encode())
-
-    async def remove_employee(self, key: int):
-        employee_url = f"{self.url}/employees/{key}"
-        await self.session.delete(employee_url)
 
 
 # Model definition - this is where the relational data schema is defined
@@ -83,41 +49,35 @@ class ClientAPI:
 class Employee(BaseModel):
     key: IntField = IntField(pk=True, allow_none=True, frozen=FrozenType.ALWAYS)
     name: StrField = StrField()
-    age: IntField = IntField(default=18)
+    age: IntField = IntField()
     address: StrField = StrField(default="Company Address")
-
-    @address.setter
-    def _validate_address(self, address: str):
-        if not address:
-            raise ValueError("Invalid address.")
-        return address
 
 
 # Data access object definition - teaches restio how to deal with
 # CRUD operations for a relational model
 
 class EmployeeDAO(BaseDAO[Employee]):
-    api = ClientAPI()
+    session: aiohttp.ClientSession = aiohttp.ClientSession(raise_for_status=True)
+    url = "http://remote-rest-api-url"
 
     async def get(self, *, key: int) -> Employee:
-        key, = pks  # Employee only contains one pk
+        employee_url = f"{self.url}/employees/{key}"
+        result = await self.session.get(employee_url)
+        employee_data = await result.json()
 
-        employee_data = await self.api.get_employee(key)
         return self._map_from_dict(employee_data)
 
     async def add(self, obj: Employee):
-        employee_dict = self._map_to_dict(obj)
-        key = await self.api.create_employee(employee_dict)
+        employees_url = f"{self.url}/employees"
+        payload = json.dumps(self._map_to_dict(obj))
+
+        response = await self.session.post(employees_url, data=payload.encode())
+
+        location = response.headers["Location"]
+        key = location.split("/")[-1]
 
         # update the model with the key generated on the server
         obj.key = key
-
-    async def update(self, obj: Employee):
-        employee_dict = self._map_to_dict(obj)
-        await self.api.update_employee(obj.key, employee_dict)
-
-    async def remove(self, obj: Employee):
-        await self.api.remove_employee(obj.key)
 
     @staticmethod
     def _map_from_dict(data: Dict[str, Any]) -> Employee:
@@ -136,30 +96,27 @@ class EmployeeDAO(BaseDAO[Employee]):
 Once `Models` and `Data Access Objects` (DAOs) are provided, you can use `Transactions` to operate the `Models`:
 
 ```python
+# instantiate the Transaction and register the DAOs EmployeeDAO
+# to deal with Employee models
+transaction = Transaction()
+transaction.register_dao(EmployeeDAO(Employee))
 
-async def alter_employees():
-    # instantiate the Transaction and register the DAOs EmployeeDAO
-    # to deal with Employee models
-    t = Transaction()
-    t.register_dao(EmployeeDAO(Employee))
+# retrieve John Doe's Employee model, that has a known primary key 1
+john = await transaction.get(Employee, 1)
+print(john) # Employee(key=1, name="John Doe", age=30, address="The Netherlands")
 
-    # retrieve John Doe's Employee model, that has a known primary key 1
-    john = await t.get(Employee, 1)   # Employee(key=1, name="John Doe", age=30, address="The Netherlands")
-    john.address = "Brazil"
+# create new Employees in local memory
+jay = Employee(name="Jay Pritchett", age=65, address="California")
+manny = Employee(name="Manuel Delgado", age=22, address="Florida")
+# tell the transaction to add the new employees to its context
+transaction.add(jay)
+transaction.add(manny)
 
-    # create a new Employee model Jay Pritchett in local memory
-    jay = Employee(name="Jay Pritchett", age=65, address="California")
-    # tell the transaction to add the new employee to its context
-    t.add(jay)
-
-    # persist all changes on the remote server
-    await t.commit()
-
-await alter_employees()
-
+# persist all changes on the remote server
+await transaction.commit()
 ```
 
-## Introduction
+## Overview
 
 When consuming remote REST APIs, the data workflow used by applications normally differs from the one done with ORMs accessing relational databases.
 
@@ -173,7 +130,7 @@ def people():
     try:
         with transaction.atomic():
             person1 = Person(name="John", age=1)
-            person2 = Person(name="Jay", age=-1)
+            person2 = Person(name="Jay", age=-1)  # mistake!
 
             person1.friends.add(person2)
 
