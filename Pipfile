@@ -29,9 +29,6 @@ pycallgraph = "*"
 [packages]
 restio = {editable = true,path = "."}
 
-[requires]
-python_version = "3.8"
-
 [scripts]
 test = "pytest -c pytest.ini"
 docs = "sphinx-build -b html docs/source docs/build"
