@@ -8,5 +8,5 @@ Modules
 
    model
    dao
-   transaction
+   session
    query

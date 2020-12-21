@@ -3,7 +3,7 @@ from typing import List
 
 import pytest
 
-from restio.transaction import Transaction
+from restio.session import Session
 from tests.integration.employee.client.api import ClientAPI
 from tests.integration.employee.client.daos import CompanyDAO, EmployeeDAO
 from tests.integration.employee.client.models import Company, Employee
@@ -47,22 +47,22 @@ class TestPerformanceEmployee(CompanyEmployeePerformanceFixture):
         await self.populate_employees(api, iterations)
 
     def test_add_multiple_employees(
-        self, benchmark_profile, iterations, transaction: Transaction
+        self, benchmark_profile, iterations, session: Session
     ):
         def wrapper():
             for _ in range(iterations):
                 employee = Employee(name="EmpName", age=18, address="Brazil")
-                transaction.add(employee)
+                session.add(employee)
 
         benchmark_profile(wrapper)
 
     @pytest.mark.asyncio
     async def test_get_multiple_employees_one_by_one(
-        self, benchmark_profile, employee_keys: List[int], transaction: Transaction,
+        self, benchmark_profile, employee_keys: List[int], session: Session,
     ):
         async def wrapper():
             for key in employee_keys:
-                await transaction.get(Employee, key=key)
+                await session.get(Employee, key=key)
 
         benchmark_profile(wrapper)
 
@@ -71,11 +71,11 @@ class TestPerformanceEmployee(CompanyEmployeePerformanceFixture):
     )
     @pytest.mark.asyncio
     async def test_get_multiple_employees_query(
-        self, benchmark_profile, transaction: Transaction, employee_dao: EmployeeDAO,
+        self, benchmark_profile, session: Session, employee_dao: EmployeeDAO,
     ):
         async def wrapper():
             q = employee_dao.get_all_employees()
-            await transaction.query(q, force=True)
+            await session.query(q, force=True)
 
         benchmark_profile(wrapper)
 
@@ -91,11 +91,11 @@ class TestPerformanceCompany(CompanyEmployeePerformanceFixture):
 
     @pytest.mark.asyncio
     async def test_get_multiple_companies_one_by_one(
-        self, benchmark_profile, transaction: Transaction, company_keys: List[str]
+        self, benchmark_profile, session: Session, company_keys: List[str]
     ):
         async def wrapper():
             for key in company_keys:
-                await transaction.get(Company, key=key)
+                await session.get(Company, key=key)
 
         benchmark_profile(wrapper)
 
@@ -104,10 +104,10 @@ class TestPerformanceCompany(CompanyEmployeePerformanceFixture):
     )
     @pytest.mark.asyncio
     async def test_get_multiple_companies_query(
-        self, benchmark_profile, transaction: Transaction, company_dao: CompanyDAO,
+        self, benchmark_profile, session: Session, company_dao: CompanyDAO,
     ):
         async def wrapper():
             q = company_dao.get_all_companies()
-            await transaction.query(q, force=True)
+            await session.query(q, force=True)
 
         benchmark_profile(wrapper)

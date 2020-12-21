@@ -18,8 +18,8 @@ Data Access Object
    :members:
 
 
-Transaction
-^^^^^^^^^^^
+Session
+^^^^^^^
 
-.. automodule:: restio.transaction
+.. automodule:: restio.session
    :members:

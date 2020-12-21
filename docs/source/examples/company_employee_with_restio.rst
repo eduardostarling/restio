@@ -149,7 +149,7 @@ The strategy is straight-forward:
 
 - We create a single shared object :code:`api` to be accessed by any DAO instance.
 - In each of the above we call the corresponding method in the :code:`ClientAPI`.
-- If a model depends on another model (e.g. :code:`Company` depends on :code:`Employee`), we ask the :code:`Transaction` to load the dependencies (not the :code:`ClientAPI` directly!) using a custom :code:`query` to do the caching of results.
+- If a model depends on another model (e.g. :code:`Company` depends on :code:`Employee`), we ask the :code:`Session` to load the dependencies (not the :code:`ClientAPI` directly!) using a custom :code:`query` to do the caching of results.
 - We create helper methods to map the dictonary data to models, and vice-versa.
 
 
@@ -216,9 +216,9 @@ And then the :code:`CompanyDAO`:
             company_employees_query = self.get_company_employees(company_key=key)
             # this will not only retrieve all the company employees, but will also
             # register all the loaded employees to the cache - the `force` argument
-            # is used to tell the transaction to execute the query again, without
+            # is used to tell the session to execute the query again, without
             # replacing the models that are already in the cache
-            company_employees = await self.transaction.query(
+            company_employees = await self.session.query(
                 company_employees_query, force=True
             )
 
@@ -228,7 +228,7 @@ And then the :code:`CompanyDAO`:
         @query
         @classmethod
         async def get_company_employees(
-            cls, company_key: str, *, transaction
+            cls, company_key: str, *, session
         ) -> FrozenSet[Employee]:
             employees_list = await api.get_company_employees(company_key)
             return frozenset(EmployeeDAO._from_dict(e) for e in employees_list)
@@ -279,32 +279,32 @@ And then the :code:`CompanyDAO`:
             )
 
 
-Hiring a new employee :code:`Chandler Bing` to :code:`Amazing Company A` can now be done by implementing :code:`main`. Note that all the requests to persist data are done in :code:`transaction.commit()`:
+Hiring a new employee :code:`Chandler Bing` to :code:`Amazing Company A` can now be done by implementing :code:`main`. Note that all the requests to persist data are done in :code:`session.commit()`:
 
 
 .. code-block:: python
 
     async def main():
-        transaction = Transaction()
-        transaction.register_dao(EmployeeDAO(Employee))
-        transaction.register_dao(CompanyDAO(Company))
+        session = Session()
+        session.register_dao(EmployeeDAO(Employee))
+        session.register_dao(CompanyDAO(Company))
 
         # loads Joseph Tribiani
-        joseph = await transaction.get(Employee, key=1000)
+        joseph = await session.get(Employee, key=1000)
         # loads the Amazing Company A
-        company_a = await transaction.get(Company, key="COMPANY_A")
+        company_a = await session.get(Company, key="COMPANY_A")
 
         # updates Joseph Tribiani's address
         joseph.address = "New address"
 
         # hires Chandler Bing, that lives together with Joseph
         chandler = Employee(name="Chandler Bing", age=26, address=joseph.address)
-        transaction.add(chandler)
+        session.add(chandler)
 
         company_a.hire_employee(chandler)
 
         # this is where all the requests are effectively made
-        await transaction.commit()
+        await session.commit()
 
 
 Full source code

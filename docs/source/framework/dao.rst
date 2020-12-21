@@ -93,22 +93,22 @@ At this point, it is already possible to interface with the remote server throug
     employee_to_add.key  # 1234
 
 
-**DAOs** on their own are not very useful. They need to be associated with a :code:`Transaction` instance in order to interact with **restio** properly (see :ref:`transaction` for more detail).
+**DAOs** on their own are not very useful. They need to be associated with a :code:`Session` instance in order to interact with **restio** properly (see :ref:`session` for more detail).
 
-In order to be used by a :code:`Transaction`, **BaseDAO** contains 4 base methods that can potentially be overwritten: :code:`get`, :code:`add`, :code:`update` and :code:`remove`. None of these methods are purely abstract, which means that a **DAOs** can only have a few of them implemented. It is up to the developer to decide which methods to include.
+In order to be used by a :code:`Session`, **BaseDAO** contains 4 base methods that can potentially be overwritten: :code:`get`, :code:`add`, :code:`update` and :code:`remove`. None of these methods are purely abstract, which means that a **DAOs** can only have a few of them implemented. It is up to the developer to decide which methods to include.
 
-+-----------+---------------+-------------------------+----------------------------------------------------------------+
-| Method    | Caller        | Parameters              | When                                                           |
-+===========+===============+=========================+================================================================+
-| get       | Transaction   | Tuple with primary keys | Before, during or after a commit, when a model needs to        |
-|           |               |                         | be retrieved from the server                                   |
-+-----------+---------------+-------------------------+----------------------------------------------------------------+
-| add       | Transaction   | Model object            | During a commit, when a model is to be added to the server     |
-+-----------+---------------+-------------------------+----------------------------------------------------------------+
-| update    | Transaction   | Model object            | During a commit, when a model is to be updated in the server   |
-+-----------+---------------+-------------------------+----------------------------------------------------------------+
-| remove    | Transaction   | Model object            | During a commit, when a model is to be removed from the server |
-+-----------+---------------+-------------------------+----------------------------------------------------------------+
++-----------+---------------+-------------------------+------------------------------------------------------------+
+| Method    | Caller    | Parameters              | When                                                           |
++===========+===============+=========================+============================================================+
+| get       | Session   | Tuple with primary keys | Before, during or after a commit, when a model needs to        |
+|           |           |                         | be retrieved from the server                                   |
++-----------+---------------+-------------------------+------------------------------------------------------------+
+| add       | Session   | Model object            | During a commit, when a model is to be added to the server     |
++-----------+---------------+-------------------------+------------------------------------------------------------+
+| update    | Session   | Model object            | During a commit, when a model is to be updated in the server   |
++-----------+---------------+-------------------------+------------------------------------------------------------+
+| remove    | Session   | Model object            | During a commit, when a model is to be removed from the server |
++-----------+---------------+-------------------------+------------------------------------------------------------+
 
 A complete implementation of the :code:`EmployeeDAO` and :code:`ClientAPI` for all CRUD operations can be seen below:
 

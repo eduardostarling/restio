@@ -27,7 +27,7 @@ For example, a model :code:`Employee` could be written using as following to rep
             return address
 
 
-All **restio** models should inherit from :code:`restio.model.BaseModel`, and all fields should be of type :code:`restio.fields.Field`. :code:`BaseModel` will guarante that the models can be properly operated by the other **restio** modules, such as Transactions and Data Access Objects.
+All **restio** models should inherit from :code:`restio.model.BaseModel`, and all fields should be of type :code:`restio.fields.Field`. :code:`BaseModel` will guarante that the models can be properly operated by the other **restio** modules, such as Sessions and Data Access Objects.
 
 
 .. _fields:
@@ -311,7 +311,7 @@ If you wish an even more customized behavior, Models and Fields will support the
 Primary keys
 ^^^^^^^^^^^^
 
-Primary keys are used to define Model uniqueness in the Transaction cache. At all times, there can only be a single model containing a particular primary key in the cache. Please check :ref:`strategies` for more in-depth details of the caching mechanism.
+Primary keys are used to define Model uniqueness in the Session cache. At all times, there can only be a single model containing a particular primary key in the cache. Please check :ref:`strategies` for more in-depth details of the caching mechanism.
 
 To define a primary key field in the model, use :code:`pk=True`.
 
@@ -362,11 +362,11 @@ Example:
     company.employees = frozenset({employee})
 
 
-The effect of using a relational field is that during a Transaction commit **restio** will check for the relationship between models by calling :code:`BaseModel.get_children()`, and trigger DAO tasks according to the dependency trees formed by all models in cache. For the example above, running :code:`company.get_children()` will return a list containing a single object :code:`employee`.
+The effect of using a relational field is that during a Session commit **restio** will check for the relationship between models by calling :code:`BaseModel.get_children()`, and trigger DAO tasks according to the dependency trees formed by all models in cache. For the example above, running :code:`company.get_children()` will return a list containing a single object :code:`employee`.
 
 There are currently three types of :code:`ModelField` provided natively by **restio**: :code:`ModelField`, :code:`TupleModelField` and :code:`FrozenSetModelField`.
 
-Please note that it is not possible to create a relationship between models that are not yet registered in the :ref:`transaction` cache, so that **restio** can properly track changes on the dependencies. For instance, if you wish to add the :code:`company` above to the Transaction cache, then :code:`employee` should be registered first.
+Please note that it is not possible to create a relationship between models that are not yet registered in the :ref:`session` cache, so that **restio** can properly track changes on the dependencies. For instance, if you wish to add the :code:`company` above to the Session cache, then :code:`employee` should be registered first.
 
 
 Frozen fields
@@ -387,23 +387,23 @@ For example, frozen behavior is very useful for primary keys that should be defi
 
     from restio.model import BaseModel
     from restio.fields import StrField
-    from restio.transaction import Transaction
+    from restio.session import Session
 
     class Employee(BaseModel):
         key: StrField = StrField(pk=True, frozen=FrozenType.UPDATE)
 
-    transaction = Transaction()
+    session = Session()
     ...  # boiler-plate code, assign DAOs, etc
 
     # it is mandatory to instantiate the employee with a key
     employee = Employee(key="my_employee_key")
 
-    transaction.add(employee)       # ok! model instance is now bound to the transaction
-    await transaction.commit()      # Employee is created on the remote server
+    session.add(employee)       # ok! model instance is now bound to the session
+    await session.commit()      # Employee is created on the remote server
 
     employee.key = "something_else" # error, field is frozen for updates
 
-The lifecycle of a model instance is controlled by :ref:`transaction`, therefore the check for non-authorized modification is only done when the instance is bound to a :code:`Transaction`. This check is disabled temporarily during a :code:`Transaction.get` or :code:`Transaction.commit` (otherwise, we wouldn't be able to update the instance with informating incoming from the server).
+The lifecycle of a model instance is controlled by :ref:`session`, therefore the check for non-authorized modification is only done when the instance is bound to a :code:`Session`. This check is disabled temporarily during a :code:`Session.get` or :code:`Session.commit` (otherwise, we wouldn't be able to update the instance with informating incoming from the server).
 
 Fields might also be only server-side defined, and cannot change at all:
 
@@ -411,21 +411,21 @@ Fields might also be only server-side defined, and cannot change at all:
 
     from restio.model import BaseModel
     from restio.fields import StrField
-    from restio.transaction import Transaction
+    from restio.session import Session
 
     class Employee(BaseModel):
         # allow_none=True makes the default value of the field to be None
         key: StrField = StrField(pk=True, allow_none=True, frozen=FrozenType.ALWAYS)
 
-    transaction = Transaction()
+    session = Session()
     ...
 
     # it is still possible to modify the key here, since the
-    # instance is not yet bound to a transaction
+    # instance is not yet bound to a session
     employee = Employee()
     employee.key = "setting_invalid_key"
 
-    transaction.add(employee)       # error, key cannot be different than None (the default)
+    session.add(employee)       # error, key cannot be different than None (the default)
 
 Even when the change happens after adding:
 
@@ -434,7 +434,7 @@ Even when the change happens after adding:
     # lets keep the defaults in place
     another_employee = Employee()
 
-    transaction.add(another_employee)  # ok! instance is now bound to the transaction
+    session.add(another_employee)  # ok! instance is now bound to the session
     another_employee.key = "some_key"  # error, key cannot be modified now
 
 Or after getting:
@@ -442,7 +442,7 @@ Or after getting:
 .. code-block:: python
 
     # how about getting the value from the remote first?
-    one_more_employee = await transaction.get(Employee, "key_value")
+    one_more_employee = await session.get(Employee, "key_value")
     one_more_employee.key  # key_value
     one_more_employee.key = "other_key"  # error, key cannot be modified
 

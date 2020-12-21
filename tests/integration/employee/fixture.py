@@ -2,7 +2,7 @@ import pytest
 from flask.testing import FlaskClient
 
 import tests.integration.employee.server as server
-from restio.transaction import Transaction
+from restio.session import Session
 from tests.integration.employee.client.api import ClientAPI
 from tests.integration.employee.client.daos import CompanyDAO, EmployeeDAO
 
@@ -32,16 +32,16 @@ class CompanyEmployeeFixture:
         return CompanyDAO(api)
 
     @pytest.fixture(scope="function")
-    def transaction(
+    def session(
         self, api: ClientAPI, employee_dao: EmployeeDAO, company_dao: CompanyDAO
-    ) -> Transaction:
-        return self._get_transaction(api, employee_dao, company_dao)
+    ) -> Session:
+        return self._get_session(api, employee_dao, company_dao)
 
-    def _get_transaction(
+    def _get_session(
         self, api: ClientAPI, employee_dao: EmployeeDAO, company_dao: CompanyDAO
     ):
-        transaction = Transaction()
-        transaction.register_dao(employee_dao)
-        transaction.register_dao(company_dao)
+        session = Session()
+        session.register_dao(employee_dao)
+        session.register_dao(company_dao)
 
-        return transaction
+        return session

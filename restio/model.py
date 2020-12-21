@@ -120,32 +120,31 @@ _repr_obj.maxother = 200
 
 class BaseModel(metaclass=BaseModelMeta):
     """
-    A representation of a remote object model in a Transaction object.
+    A representation of a remote object model.
 
     BaseModel is an abstract class that should be extended to represent models incoming
     from or outgoing to a remote REST API.
 
-    Models can exist independently from Transactions but contain an internal state that
-    indicates the status of the model within the current context. The Transactions are
+    Models can exist independently from Sessions but contain an internal state that
+    indicates the status of the model within the current context. The Sessions are
     responsible to control this state. Also, each model contains a set of control
     attributes that indicate which fields are watched by restio internals. By default,
     all Field descriptors in the model will become field attributes. Fields declared
     with pk=True will be used by restio to optimize the caching of the models in a
-    Transaction.
+    Session.
 
     Models that change over time will contain an internal dictionary with the latest
     know persistent value of each field. This is done to guarantee fast rollback of the
-    values when the Transaction is invalid, and to also indicate which values might
-    have changed within the transaction scope. If a field is modified directly, the
-    model will intercept the change and save the older value into the persistent
-    dictionary until `_persist` is called. During a `_rollback` call, however, the
-    stored values are re-assigned to their original attributes. Each attribute change
-    will also dispatch an update event so that the transaction is aware of changes and
-    manages the model's internal state accordingly. The persistent dictionary (through
-    the helper method `is_field_modified`) can also be used by DAO's to verify which
-    values where updated prior to sending a request through the REST API, thus allowing
-    for proper optimization and minimizing chances of conflicting changes on the remote
-    object.
+    values when the Session is invalid, and to also indicate which values might have
+    changed within the session scope. If a field is modified directly, the model will
+    intercept the change and save the older value into the persistent dictionary until
+    `_persist` is called. During a `_rollback` call, however, the stored values are
+    re-assigned to their original attributes. Each attribute change will also dispatch
+    an update event so that the session is aware of changes and manages the model's
+    internal state accordingly. The persistent dictionary (through the helper method
+    `is_field_modified`) can also be used by DAO's to verify which values where updated
+    prior to sending a request through the REST API, thus allowing for proper
+    optimization and minimizing chances of conflicting changes on the remote object.
 
     All models automatically generate a random internal UUID when created. This UUID is
     used internally for comparison purposes, and externally as an identity. Although

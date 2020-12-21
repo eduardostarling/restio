@@ -18,22 +18,22 @@ from typing import (
 from restio.model import BaseModel
 
 if TYPE_CHECKING:
-    from restio.transaction import Transaction
+    from restio.session import Session
 
 
 Model_co = TypeVar("Model_co", bound=BaseModel, covariant=True)
 
-TRANSACTION_KEYWORD = "transaction"
+SESSION_KEYWORD = "session"
 
 
 class BaseQuery(Generic[Model_co]):
     """
-    Defines a query object to be processed by a Transaction.
+    Defines a query object to be processed by a Session.
 
     Every BaseQuery instance has an internal hash that is generated based on the
-    function to be invoked and its parameters. This hash is used by Transaction query
-    cache to store results for queries already executed in the context of the instance
-    of the Transaction.
+    function to be invoked and its parameters. This hash is used by Session query cache
+    to store results for queries already executed in the context of the instance of the
+    Session.
 
     Two instances of BaseQuery pointing to the same `function` and with the same `args`
     and `kwargs` provided will resolve on the same hash, and therefore are considered
@@ -42,8 +42,8 @@ class BaseQuery(Generic[Model_co]):
 
     __args: Tuple
     __kwargs: Dict[str, Any]
-    __transaction: Optional["Transaction"]
-    __has_transaction_argument: bool
+    __session: Optional["Session"]
+    __has_session_argument: bool
 
     def __init__(
         self, function: Callable[..., Awaitable[Iterable[Model_co]]], *args, **kwargs,
@@ -51,28 +51,28 @@ class BaseQuery(Generic[Model_co]):
         self.__function = function
         self.__args = args or tuple()
         self.__kwargs = kwargs or {}
-        self.__transaction = None
+        self.__session = None
 
-        # inspect the function to look for the transaction keyword
+        # inspect the function to look for the session keyword
         params = inspect.signature(function).parameters
-        transaction_parameter = params.get(TRANSACTION_KEYWORD, None)
-        self.__has_transaction_argument = bool(transaction_parameter)
+        session_parameter = params.get(SESSION_KEYWORD, None)
+        self.__has_session_argument = bool(session_parameter)
 
     def __hash__(self):
         hash_list: List[Any] = [self.__function]
 
         signature = inspect.signature(self.__function)
 
-        # adds the transaction for binding
+        # adds the session for binding
         kwargs = self.__kwargs
-        if self.__has_transaction_argument:
+        if self.__has_session_argument:
             kwargs = kwargs.copy()
-            kwargs[TRANSACTION_KEYWORD] = None
+            kwargs[SESSION_KEYWORD] = None
 
         parameters = signature.bind(*self.__args, **kwargs)
 
-        # now ignore the transaction keyword
-        parameters.arguments.pop(TRANSACTION_KEYWORD, None)
+        # now ignore the session keyword
+        parameters.arguments.pop(SESSION_KEYWORD, None)
 
         hash_list.extend(list(parameters.arguments.items()))
 
@@ -87,24 +87,22 @@ class BaseQuery(Generic[Model_co]):
 
         return False
 
-    def __call__(self, transaction: "Transaction"):
-        self.__transaction = transaction
+    def __call__(self, session: "Session"):
+        self.__session = session
         return self
 
     def __await__(self) -> Generator[Any, Iterable[Model_co], Iterable[Model_co]]:
         kwargs = self.__kwargs
 
-        if self.__has_transaction_argument:
+        if self.__has_session_argument:
             kwargs = self.__kwargs.copy()
-            transaction = self.__transaction or self.__kwargs.get(
-                TRANSACTION_KEYWORD, None
-            )
+            session = self.__session or self.__kwargs.get(SESSION_KEYWORD, None)
 
-            if not transaction:
+            if not session:
                 raise RuntimeError(
-                    f"Transaction not provided for querying {self.__function.__name__}."
+                    f"Session not provided for querying {self.__function.__name__}."
                 )
-            kwargs[TRANSACTION_KEYWORD] = transaction
+            kwargs[SESSION_KEYWORD] = session
 
         return (yield from self.__function(*self.__args, **kwargs).__await__())
 
@@ -116,13 +114,13 @@ def query(
     Query decorator.
 
     This should be used to decorate functions that return query results to be stored by
-    a Transaction. Any decorated functions might contain a parameter
-    `{TRANSACTION_KEYWORD}` that will receive the Transaction instance object. If this
-    parameter is provided when building the query, it gets overwritten when the query
-    is executed by a Transaction.
+    a Session. Any decorated functions might contain a parameter `{SESSION_KEYWORD}`
+    that will receive the Session instance object. If this parameter is provided when
+    building the query, it gets overwritten when the query is executed by a
+    Session.
 
     Queries are useful when performing batch operations on the remote server. The
-    Transaction instance will use the query results and store them internally for
+    Session instance will use the query results and store them internally for
     caching purposes.
     """
 
