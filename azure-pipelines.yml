@@ -105,7 +105,7 @@ jobs:
         displayName: 'Install dependencies for version $(python.version)'
 
       - script: |
-          pytest
+          pytest --ignore=tests/performance
         displayName: 'Run tests'
 
       - task: PublishTestResults@2
