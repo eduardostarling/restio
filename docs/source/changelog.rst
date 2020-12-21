@@ -4,9 +4,9 @@ Changelog
 1.0.0b5
 -------
 
+- Added official support for Python 3.9.
 - **BREAKING CHANGE**: Renamed the term :code:`Transaction` to :code:`Session`, so that the naming is more consistent with the intent. As per community feedback, the term Transaction would often imply that rollbacks are possible on server side, as it happens in other database ORMs. This change applies to modules, classes, variables and all other references.
 - To follow the above change, an improved description of :code:`Session.rollback()` has been added.
-
 
 1.0.0b4
 -------

@@ -12,7 +12,8 @@ pr:
 
 variables:
   pipenvVersion: '2018.11.26'
-  mainPythonVersion: '3.8'
+  mainPythonVersion: '3.9'
+  vmImage: 'ubuntu-20.04'
 
 jobs:
   # build job - only runs on latest supported python
@@ -20,7 +21,7 @@ jobs:
   - job: Build
     displayName: Build
     pool:
-      vmImage: 'ubuntu-latest'
+      vmImage: $(vmImage)
     variables:
       python.version: $(mainPythonVersion)
     steps:
@@ -74,14 +75,16 @@ jobs:
 
   - job: Test
     pool:
-      vmImage: 'ubuntu-latest'
+      vmImage: $(vmImage)
     strategy:
       matrix:
         Python37:
           python.version: '3.7'
         Python38:
           python.version: '3.8'
-      maxParallel: 2
+        Python39:
+          python.version: '3.9'
+      maxParallel: 3
     dependsOn: Build
     condition: succeeded('Build')
     steps:
@@ -102,7 +105,7 @@ jobs:
         displayName: 'Install dependencies for version $(python.version)'
 
       - script: |
-          pytest
+          pytest --ignore=tests/performance
         displayName: 'Run tests'
 
       - task: PublishTestResults@2
@@ -124,7 +127,7 @@ jobs:
   - job: Publish
     displayName: Publish to PyPI and GitHub
     pool:
-      vmImage: 'ubuntu-latest'
+      vmImage: $(vmImage)
     dependsOn:
       - Build
       - Test
