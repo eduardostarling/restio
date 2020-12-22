@@ -60,7 +60,9 @@ class BaseModelMeta(type):
         dct["_meta"] = meta
 
         def _update_meta(
-            _meta: ModelMeta, extend: bool, not_inherited: Tuple[str, ...] = tuple()
+            _meta: Optional[ModelMeta],
+            extend: bool,
+            not_inherited: Tuple[str, ...] = tuple(),
         ):
             if not _meta:
                 return
@@ -87,8 +89,7 @@ class BaseModelMeta(type):
 
             _update_meta(base._meta, True, __MODEL_META_NOT_INHERITED__)
 
-        _meta: ModelMeta = dct.get("Meta", None)
-        _update_meta(_meta, False)
+        _update_meta(dct.get("Meta", None), False)
 
         # process class fields
         for field_name, field_value in dct.items():
