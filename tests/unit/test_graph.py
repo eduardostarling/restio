@@ -10,6 +10,9 @@ from restio.model import BaseModel
 
 
 class ModelMock(BaseModel):
+    class Meta:
+        alias = "GraphModelMock"
+
     name: StrField = StrField()
     first_child: ModelField[BaseModel] = ModelField(BaseModel)
     second_child: ModelField[BaseModel] = ModelField(BaseModel)

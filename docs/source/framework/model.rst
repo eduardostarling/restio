@@ -368,6 +368,23 @@ There are currently three types of :code:`ModelField` provided natively by **res
 
 Please note that it is not possible to create a relationship between models that are not yet registered in the :ref:`session` cache, so that **restio** can properly track changes on the dependencies. For instance, if you wish to add the :code:`company` above to the Session cache, then :code:`employee` should be registered first.
 
+For use cases in which a Model class depends on itself, or in other Model types that are not yet loaded within the scope of **restio**, you should specify the type as a string, for evaluation in runtime:
+
+.. code-block:: python
+
+    class Employee(BaseModel):
+        employees: FrozenSetModelField[Employee] = FrozenSetModelField("Employee", default_factory=frozenset)
+
+In the situation above, "Employee" is used as an alias which defaults to the class name. If you wish to use a different name (for example, to avoid naming collision with other classes), then you should specify the alias name as the type:
+
+.. code-block:: python
+
+    class Employee(BaseModel):
+        class Meta:
+            alias = "EmployeeAlias"
+
+        employees: FrozenSetModelField[Employee] = FrozenSetModelField("EmployeeAlias", default_factory=frozenset)
+
 
 Frozen fields
 ^^^^^^^^^^^^^
@@ -468,16 +485,17 @@ All model classes contain an internal structure :code:`ModelMeta`, which defines
             init = True
             init_ignore_extra = True
             repr = True
-
+            alias = "ModelAlias"
         ...
 
-The individual attributes given to :code:`Meta` are always static and accumulate through inheritance.
+The individual attributes given to :code:`Meta` are always static and most accumulate through inheritance, with exception of :code:`alias`.
 
 Currently, the following attributes can be provided to :code:`Meta`:
 
 - :code:`init` (:code:`bool`, defaults to :code:`True`): Indicates if the default base constructor behavior will be active. When :code:`True`, parameters given to the constructor will be assigned to fields that match their names. When :code:`False`, this assignment is skipped.
 - :code:`init_ignore_extra` (:code:`bool`, defaults to :code:`True`): Indicates if extra parameters given to the constructor will be ignored. When not ignored, any extra parameter passed to :code:`BaseModel.__init__` raises an Exception.
 - :code:`repr` (:code:`bool`, defaults to :code:`True`): Enables the generation of :code:`repr` strings on :code:`BaseModel.__repr__`. When :code:`True`, all fields marked with :code:`repr=True` (also the default) will be included on the output of :code:`__repr__`. When :code:`False`, the default Python :code:`__repr__` is used.
+- :code:`alias` (:code:`Optional[str]`, defaults to :code:`None`): Defines an alias name for the Model class, to which other models can refer to as strings. When :code:`alias=None`, the Model class will automatically set the class name as the alias. Two models are never allowed to contain the same alias (which will result in an error otherwise).
 
 
 Example using relational models

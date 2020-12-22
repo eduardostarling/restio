@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type
 from uuid import UUID, uuid4
 
 from restio.event import EventListener
-from restio.fields.base import Field, T_co
+from restio.fields.base import MODEL_TYPE_REGISTRY, Field, T_co
 from restio.state import ModelState
 
 
@@ -16,13 +16,14 @@ def _check_model_type(obj: Optional[BaseModel]):
 
 
 class ModelMeta:
-    __slots__ = ("init", "init_ignore_extra", "repr", "fields", "primary_keys")
+    __slots__ = ("init", "init_ignore_extra", "repr", "fields", "primary_keys", "alias")
 
     init: bool
     init_ignore_extra: bool
     repr: bool
     fields: Dict[str, Field]
     primary_keys: Dict[str, Field]
+    alias: Optional[str]
 
     def __init__(self):
         self.init = True
@@ -30,10 +31,13 @@ class ModelMeta:
         self.repr = True
         self.fields = dict()
         self.primary_keys = dict()
+        self.alias = None
 
 
+# Meta attributes that don't get inherited from parent classes
+__MODEL_META_NOT_INHERITED__ = ("alias",)
 # Read-only meta attributes, can't be modified by model class
-__model_meta_exclude__ = ("fields", "primary_keys")
+__MODEL_META_READONLY__ = ("fields", "primary_keys")
 
 
 class BaseModelMeta(type):
@@ -55,11 +59,15 @@ class BaseModelMeta(type):
         meta = ModelMeta()
         dct["_meta"] = meta
 
-        def _update_meta(_meta: ModelMeta, extend: bool):
+        def _update_meta(
+            _meta: ModelMeta, extend: bool, not_inherited: Tuple[str, ...] = tuple()
+        ):
             if not _meta:
                 return
 
-            propagate_meta = set(meta.__slots__) - set(__model_meta_exclude__)
+            propagate_meta = (
+                set(meta.__slots__) - set(__MODEL_META_READONLY__) - set(not_inherited)
+            )
 
             for meta_attribute in propagate_meta:
                 if not hasattr(_meta, meta_attribute):
@@ -77,7 +85,7 @@ class BaseModelMeta(type):
             if not hasattr(base, "_meta"):
                 continue
 
-            _update_meta(base._meta, True)
+            _update_meta(base._meta, True, __MODEL_META_NOT_INHERITED__)
 
         _meta: ModelMeta = dct.get("Meta", None)
         _update_meta(_meta, False)
@@ -91,7 +99,24 @@ class BaseModelMeta(type):
             if field_value.pk:
                 meta.primary_keys[field_name] = field_value
 
-        return super().__new__(cls, name, bases, dct)
+        # set alias name to class name when None
+        name_alias = meta.alias or name
+
+        # validate if the alias is not duplicate
+        # the caveat here is that two classes with the same name in two
+        # different files will have a name collision and fail initializing
+        if name_alias in MODEL_TYPE_REGISTRY:
+            raise ValueError(
+                f"Model alias `{name_alias}` is already used by another class."
+            )
+
+        cls_object = super().__new__(cls, name, bases, dct)
+
+        # set the model alias to the model type
+        if name_alias != "BaseModel":
+            MODEL_TYPE_REGISTRY[name_alias] = cls_object
+
+        return cls_object
 
     def __call__(self, *args, **kwargs):
         instance: BaseModel = super().__call__(*args, **kwargs)

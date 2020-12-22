@@ -266,7 +266,7 @@ class FrozenSetField(IterableField[FrozenSet[SubT], SubT]):
 class ModelField(Field[Model_co]):
     def __init__(
         self,
-        model_type: Type[Model_co],
+        model_type: Union[Type[Model_co], str],
         *,
         init: bool = True,
         default: Union[Optional[Model_co], Type[MISSING]] = MISSING,
@@ -298,7 +298,7 @@ class ModelField(Field[Model_co]):
 class TupleModelField(TupleField[Model_co]):
     def __init__(
         self,
-        model_type: Type[Model_co],
+        model_type: Union[Type[Model_co], str],
         *,
         init: bool = True,
         default: Union[Tuple[Model_co, ...], Type[MISSING]] = MISSING,
@@ -312,7 +312,7 @@ class TupleModelField(TupleField[Model_co]):
         type_check: bool = True,
     ) -> None:
         super().__init__(
-            sub_type=model_type,
+            sub_type=model_type,  # type: ignore
             init=init,
             default=default,
             default_factory=default_factory,
@@ -327,7 +327,7 @@ class TupleModelField(TupleField[Model_co]):
 class FrozenSetModelField(FrozenSetField[Model_co]):
     def __init__(
         self,
-        model_type: Type[Model_co],
+        model_type: Union[Type[Model_co], str],
         *,
         init: bool = True,
         default: Union[Optional[FrozenSet[Model_co]], Type[MISSING]] = MISSING,
@@ -341,7 +341,7 @@ class FrozenSetModelField(FrozenSetField[Model_co]):
         type_check: bool = True,
     ) -> None:
         super().__init__(
-            sub_type=model_type,
+            sub_type=model_type,  # type: ignore
             init=init,
             default=default,
             default_factory=default_factory,

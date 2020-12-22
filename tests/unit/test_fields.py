@@ -18,7 +18,7 @@ from restio.fields import (
     TupleModelField,
     UUIDField,
 )
-from restio.fields.base import Field, FrozenType
+from restio.fields.base import ContainerField, Field, FrozenType
 from restio.model import BaseModel
 
 
@@ -195,6 +195,92 @@ class TestFields:
         obj = Model()
 
         assert obj.field == expected_value
+
+    def test_model_field_string_type(self):
+        class Model(BaseModel):
+            field = ModelField(type_check=True, model_type="Model")
+
+        obj = Model()
+        obj_set = Model()
+
+        obj.field = obj_set
+
+        assert obj.field == obj_set
+        assert Model._meta.fields["field"].type_ == Model
+
+    def test_model_field_string_type_wrong_value_type(self):
+        class Model(BaseModel):
+            field = ModelField(type_check=True, model_type="Model")
+
+        obj = Model()
+
+        obj_set = FieldsModel()
+
+        with pytest.raises(TypeError):
+            obj.field = obj_set
+
+    def test_model_field_string_type_not_relational(self):
+
+        with pytest.raises(TypeError, match="is invalid for non-relational"):
+
+            class Model(BaseModel):
+                field = Field(
+                    type_="Model",
+                    pk=False,
+                    allow_none=False,
+                    depends_on=False,
+                    frozen=FrozenType.NEVER,
+                )
+
+    @pytest.mark.parametrize(
+        "field_type, factory",
+        [(TupleModelField, tuple), (FrozenSetModelField, frozenset)],
+    )
+    def test_iterable_model_field_string_type(self, field_type, factory):
+        class Model(BaseModel):
+            field = field_type(
+                type_check=True, model_type="Model", default_factory=factory
+            )
+
+        obj = Model()
+        obj_set = factory([Model(field=factory())])
+
+        obj.field = obj_set
+
+        assert obj.field == obj_set
+        assert Model._meta.fields["field"].sub_type == Model  # type: ignore
+
+    @pytest.mark.parametrize(
+        "field_type, factory",
+        [(TupleModelField, tuple), (FrozenSetModelField, frozenset)],
+    )
+    def test_iterable_model_field_string_type_wrong_model_type(
+        self, field_type, factory
+    ):
+        class Model(BaseModel):
+            field = field_type(
+                type_check=True, model_type="Model", default_factory=factory
+            )
+
+        obj = Model()
+        obj_set = factory([FieldsModel(field=factory())])
+
+        with pytest.raises(TypeError):
+            obj.field = obj_set
+
+    def test_model_field_string_type_container_not_relational(self):
+
+        with pytest.raises(TypeError, match="is invalid for non-relational"):
+
+            class Model(BaseModel):
+                field = ContainerField(
+                    type_=tuple,
+                    sub_type="Model",
+                    pk=False,
+                    allow_none=False,
+                    depends_on=False,
+                    frozen=FrozenType.NEVER,
+                )
 
     _setter_params = [
         (lambda **kwargs: IntField(default=0, **kwargs), 1, 2),
