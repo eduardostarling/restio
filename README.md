@@ -33,13 +33,15 @@ pip install --pre restio
 A typical REST Client API implemented with **restio** looks like the following:
 
 ```python
-from typing import Dict, Any
+from __future__ import annotations
 
-import json
+from typing import Dict, Any, Optional
+
 import aiohttp
+import json
 
 from restio.dao import BaseDAO
-from restio.fields import FrozenSetModelField, IntField, StrField
+from restio.fields import ModelField, IntField, StrField
 from restio.model import BaseModel
 from restio.session import Session
 
@@ -51,27 +53,32 @@ class Employee(BaseModel):
     name: StrField = StrField()
     age: IntField = IntField()
     address: StrField = StrField(default="Company Address")
+    boss: ModelField[Optional[Employee]] = ModelField("Employee", allow_none=True)
 
 
 # Data access object definition - teaches restio how to deal with
 # CRUD operations for a relational model
 
 class EmployeeDAO(BaseDAO[Employee]):
-    session: aiohttp.ClientSession = aiohttp.ClientSession(raise_for_status=True)
+    client_session: aiohttp.ClientSession = aiohttp.ClientSession(raise_for_status=True)
     url = "http://remote-rest-api-url"
 
     async def get(self, *, key: int) -> Employee:
         employee_url = f"{self.url}/employees/{key}"
-        result = await self.session.get(employee_url)
+        result = await self.client_session.get(employee_url)
         employee_data = await result.json()
 
-        return self._map_from_dict(employee_data)
+        # asks the current session to retrieve the boss from cache or
+        # to reach to the remote server
+        boss = await self.session.get(Employee, key=employee_data["boss"])
+
+        return self._map_from_dict(employee_data, boss)
 
     async def add(self, obj: Employee):
         employees_url = f"{self.url}/employees"
         payload = json.dumps(self._map_to_dict(obj))
 
-        response = await self.session.post(employees_url, data=payload.encode())
+        response = await self.client_session.post(employees_url, data=payload.encode())
 
         location = response.headers["Location"]
         key = location.split("/")[-1]
@@ -80,17 +87,23 @@ class EmployeeDAO(BaseDAO[Employee]):
         obj.key = key
 
     @staticmethod
-    def _map_from_dict(data: Dict[str, Any]) -> Employee:
+    def _map_from_dict(data: Dict[str, Any], boss: Employee) -> Employee:
         return Employee(
             key=int(data["key"]),
             name=str(data["name"]),
             age=int(data["age"]),
-            address=str(data["address"])
+            address=str(data["address"]),
+            boss=boss
         )
 
     @staticmethod
     def _map_to_dict(model: Employee) -> Dict[str, Any]:
-        return dict(name=model.name, age=model.age, address=model.address)
+        return dict(
+            name=model.name,
+            age=model.age,
+            address=model.address,
+            boss=model.boss.key
+        )
 ```
 
 Once `Models` and `Data Access Objects` (DAOs) are provided, you can use `Sessions` to operate the `Models`:
@@ -103,11 +116,10 @@ session.register_dao(EmployeeDAO(Employee))
 
 # retrieve John Doe's Employee model, that has a known primary key 1
 john = await session.get(Employee, key=1)  # Employee(key=1, name="John Doe", age=30, address="The Netherlands")
-john.address = "Brazil"
 
 # create new Employees in local memory
 jay = Employee(name="Jay Pritchett", age=65, address="California")
-manny = Employee(name="Manuel Delgado", age=22, address="Florida")
+manny = Employee(name="Manuel Delgado", age=22, address="Florida", boss=jay)
 # tell the session to add the new employees to its context
 session.add(jay)
 session.add(manny)

@@ -27,6 +27,9 @@ from restio.state import ModelState
 
 
 class ModelA(BaseModel):
+    class Meta:
+        alias = "TransactionModelA"
+
     key: IntField = IntField(pk=True, default=1)
     v: IntField = IntField(default=0)
     s: StrField = StrField(default="")

@@ -1,6 +1,15 @@
 import inspect
 from enum import Flag, auto
-from typing import TYPE_CHECKING, Callable, Generic, Optional, Type, TypeVar, Union
+from typing import (
+    TYPE_CHECKING,
+    Callable,
+    Dict,
+    Generic,
+    Optional,
+    Type,
+    TypeVar,
+    Union,
+)
 
 if TYPE_CHECKING:
     from restio.model import BaseModel
@@ -9,6 +18,14 @@ if TYPE_CHECKING:
 Model_co = TypeVar("Model_co", bound="BaseModel", covariant=True)
 T_co = TypeVar("T_co", bound=object, covariant=True)
 SubT = TypeVar("SubT")
+
+# Stores the names for a model class type
+# this object stays here and is globaly declared so that it can be
+# accessed by both BaseModelMeta and Field instances
+# In case we need to do any further business with this object,
+# then implement a Singleton class to handle the object in a more
+# structured way
+MODEL_TYPE_REGISTRY: Dict[str, Type] = {}
 
 
 def _check_field_value_type(
@@ -51,7 +68,7 @@ class Field(Generic[T_co], object):
     Base type for Fields.
     """
 
-    type_: Type[T_co]
+    type_: Union[Type[T_co], str]
     name: str
     init: bool
     pk: bool
@@ -67,7 +84,7 @@ class Field(Generic[T_co], object):
 
     def __init__(
         self,
-        type_: Type[T_co],
+        type_: Union[Type[T_co], str],
         *,
         pk: bool,
         allow_none: bool,
@@ -102,6 +119,9 @@ class Field(Generic[T_co], object):
         self.repr = repr
         self.type_check = type_check
 
+        # post-assignment validation
+        self._validate_string_type(self.type_)
+
     def __set_name__(self, owner, name: str):
         self.name = name
 
@@ -134,13 +154,44 @@ class Field(Generic[T_co], object):
 
     def _check_value(self, instance: "BaseModel", value: T_co) -> T_co:
         if self.type_check:
+            self._cache_string_field_type(instance)
             _check_field_value_type(
-                self.type_,
+                self.type_,  # type: ignore
                 self._field_name(instance),
                 value,
                 allow_none=self.allow_none,
             )
         return self._setter(instance, value) if self._setter is not None else value
+
+    def _cache_string_field_type(self, instance: "BaseModel"):
+        # this is a one-off operation, for the first check
+        if not isinstance(self.type_, str):
+            return
+
+        self.type_ = self._parse_string_field_type(instance, self.type_)  # type: ignore
+
+    def _parse_string_field_type(
+        self, instance: "BaseModel", type_: str
+    ) -> Union[Type[T_co], Type[SubT]]:
+        if type_ not in MODEL_TYPE_REGISTRY:
+            raise TypeError(
+                f"Provided type alias `{type_}` for field "
+                "`{self._field_name(instance)}` is not valid."
+            )
+
+        return MODEL_TYPE_REGISTRY[type_]
+
+    def _validate_string_type(self, type_: Union[Type[T_co], str]):
+        if not self.type_check:
+            return
+
+        if not isinstance(type_, str):
+            return
+
+        if not self.depends_on:
+            raise TypeError(
+                f"Type string `{type_}` is invalid for non-relational field."
+            )
 
     @property
     def default(self) -> T_co:
@@ -199,12 +250,12 @@ class Field(Generic[T_co], object):
 
 
 class ContainerField(Field[T_co], Generic[T_co, SubT]):
-    sub_type: Type[SubT]
+    sub_type: Union[Type[SubT], str]
 
     def __init__(
         self,
-        type_: Type[T_co],
-        sub_type: Type[SubT],
+        type_: Union[Type[T_co], str],
+        sub_type: Union[Type[SubT], str],
         *,
         pk: bool,
         allow_none: bool,
@@ -232,16 +283,34 @@ class ContainerField(Field[T_co], Generic[T_co, SubT]):
         )
         self.sub_type = sub_type
 
-    def _check_sub_value(self, sub_value: SubT):
+        self._validate_string_type(self.sub_type)
+
+    def _check_sub_value(self, instance: "BaseModel", sub_value: SubT):
         if self.type_check:
-            _check_field_value_type(self.sub_type, self.name, sub_value)
+            self._cache_string_field_type(instance)
+
+            _check_field_value_type(
+                self.sub_type,  # type: ignore
+                self.name,
+                sub_value,
+            )
+
+    def _cache_string_field_type(self, instance: "BaseModel"):
+        super()._cache_string_field_type(instance)
+
+        if not isinstance(self.sub_type, str):
+            return
+
+        self.sub_type = self._parse_string_field_type(  # type: ignore
+            instance, self.sub_type
+        )
 
 
 class IterableField(ContainerField[T_co, SubT]):
     def __init__(
         self,
-        type_: Type[T_co],
-        sub_type: Type[SubT],
+        type_: Union[Type[T_co], str],
+        sub_type: Union[Type[SubT], str],
         *,
         allow_none: bool,
         depends_on: bool,
@@ -272,5 +341,5 @@ class IterableField(ContainerField[T_co, SubT]):
         if self.type_check:
             value = super()._check_value(instance, value)
             for item in value:
-                super()._check_sub_value(item)
+                super()._check_sub_value(instance, item)
         return value

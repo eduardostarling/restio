@@ -259,6 +259,7 @@ class TestModel:
         class ParentModel(BaseModel):
             class Meta:
                 init = False
+                alias = "ParentModelAlias"
 
         class ChildModel(ParentModel):
             class Meta:
@@ -269,16 +270,56 @@ class TestModel:
             class Meta:
                 init = False
                 init_extra_ignore = True
+                alias = "GrandChildModelAlias"
 
         parent_model = ParentModel()
         child_model = ChildModel()
         grand_child_model = GrandChildModel()
 
-        self._assert_model_meta(parent_model, {"init": False})
-        self._assert_model_meta(child_model, {"init": True, "init_extra_ignore": False})
         self._assert_model_meta(
-            grand_child_model, {"init": False, "init_extra_ignore": True}
+            parent_model, {"init": False, "alias": "ParentModelAlias"}
         )
+        self._assert_model_meta(
+            child_model, {"init": True, "init_extra_ignore": False, "alias": None}
+        )
+        self._assert_model_meta(
+            grand_child_model,
+            {"init": False, "init_extra_ignore": True, "alias": "GrandChildModelAlias"},
+        )
+
+    def test_model_field_string_type_repeated_alias(self):
+        with pytest.raises(ValueError, match="`A` is already used"):
+
+            class ModelA(BaseModel):
+                class Meta:
+                    alias = "A"
+
+            class ModelB(BaseModel):
+                class Meta:
+                    alias = "A"
+
+    def test_model_field_string_type_repeated_model_name(self):
+        with pytest.raises(ValueError, match="`ModelName` is already used"):
+            type("ModelName", (BaseModel,), {})
+            type("ModelName", (BaseModel,), {})
+
+    def test_model_field_string_type_alias_match_other_model_name(self):
+        with pytest.raises(ValueError, match="`OtherModelName` is already used"):
+
+            class OtherModelName(BaseModel):
+                pass
+
+            class OneMoreModel(BaseModel):
+                class Meta:
+                    alias = "OtherModelName"
+
+    def test_model_field_string_type_invalid_model_alias(self):
+        with pytest.raises(TypeError, match="Provided type alias"):
+
+            class DependentModel(BaseModel):
+                field = ModelField(model_type="NonExistingModelAlias")
+
+            DependentModel(field="anything")
 
     def test_all_field_types_in_model(self):
         class AllFieldsModel(BaseModel):
