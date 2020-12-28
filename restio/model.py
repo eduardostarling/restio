@@ -6,7 +6,8 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type
 from uuid import UUID, uuid4
 
 from restio.event import EventListener
-from restio.fields.base import MODEL_TYPE_REGISTRY, Field, T_co
+from restio.fields.base import Field, T_co
+from restio.shared import MODEL_TYPE_REGISTRY
 from restio.state import ModelState
 
 

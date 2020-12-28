@@ -1,6 +1,6 @@
 import pytest
 
-from restio.fields.base import MODEL_TYPE_REGISTRY
+from restio.shared import MODEL_TYPE_REGISTRY
 
 
 def pytest_addoption(parser):

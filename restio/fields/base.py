@@ -1,15 +1,8 @@
 import inspect
 from enum import Flag, auto
-from typing import (
-    TYPE_CHECKING,
-    Callable,
-    Dict,
-    Generic,
-    Optional,
-    Type,
-    TypeVar,
-    Union,
-)
+from typing import TYPE_CHECKING, Callable, Generic, Optional, Type, TypeVar, Union
+
+from restio.shared import MODEL_TYPE_REGISTRY
 
 if TYPE_CHECKING:
     from restio.model import BaseModel
@@ -18,14 +11,6 @@ if TYPE_CHECKING:
 Model_co = TypeVar("Model_co", bound="BaseModel", covariant=True)
 T_co = TypeVar("T_co", bound=object, covariant=True)
 SubT = TypeVar("SubT")
-
-# Stores the names for a model class type
-# this object stays here and is globaly declared so that it can be
-# accessed by both BaseModelMeta and Field instances
-# In case we need to do any further business with this object,
-# then implement a Singleton class to handle the object in a more
-# structured way
-MODEL_TYPE_REGISTRY: Dict[str, Type] = {}
 
 
 def _check_field_value_type(
