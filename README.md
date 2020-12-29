@@ -114,18 +114,17 @@ Once `Models` and `Data Access Objects` (DAOs) are provided, you can use `Sessio
 session = Session()
 session.register_dao(EmployeeDAO(Employee))
 
-# retrieve John Doe's Employee model, that has a known primary key 1
-john = await session.get(Employee, key=1)  # Employee(key=1, name="John Doe", age=30, address="The Netherlands")
+# initialize session context
+async with session:
+    # retrieve John Doe's Employee model, that has a known primary key 1
+    john = await session.get(Employee, key=1)  # Employee(key=1, name="John Doe", age=30, address="The Netherlands")
 
-# create new Employees in local memory
-jay = Employee(name="Jay Pritchett", age=65, address="California")
-manny = Employee(name="Manuel Delgado", age=22, address="Florida", boss=jay)
-# tell the session to add the new employees to its context
-session.add(jay)
-session.add(manny)
+    # create new Employees in local memory
+    jay = Employee(name="Jay Pritchett", age=65, address="California")
+    manny = Employee(name="Manuel Delgado", age=22, address="Florida", boss=jay)
 
-# persist all changes on the remote server
-await transaction.commit()
+# at the end of the context, `session.commit()` is called automatically
+# and changes are propagated to the server
 ```
 
 ## Overview

@@ -75,11 +75,9 @@ class TestIntegrationCompanyEmployee(CompanyEmployeeFixture):
         employee_dao: EmployeeDAO,
         company_dao: CompanyDAO,
     ):
-        new_employee = Employee(name="Chandler Bing", age=26, address="California")
-        session.add(new_employee)
-        assert new_employee.key is None
-
-        await session.commit()
+        async with session:
+            new_employee = Employee(name="Chandler Bing", age=26, address="California")
+            assert new_employee.key is None
 
         assert new_employee.key is not None
 
@@ -99,16 +97,14 @@ class TestIntegrationCompanyEmployee(CompanyEmployeeFixture):
 
     @pytest.mark.asyncio
     async def test_create_and_hire_employee(self, session: Session):
-        new_employee = Employee(name="Chandler Bing", age=26, address="California")
-        company = await session.get(Company, key="COMPANY_B")
-        session.add(new_employee)
+        async with session:
+            new_employee = Employee(name="Chandler Bing", age=26, address="California")
+            company = await session.get(Company, key="COMPANY_B")
 
-        company.hire_employee(new_employee)
+            company.hire_employee(new_employee)
 
-        assert new_employee.key is None
-        assert new_employee in company.employees
-
-        await session.commit()
+            assert new_employee.key is None
+            assert new_employee in company.employees
 
         assert new_employee.key is not None
         assert new_employee in company.employees
@@ -131,11 +127,11 @@ class TestIntegrationCompanyEmployee(CompanyEmployeeFixture):
         employee_dao: EmployeeDAO,
         company_dao: CompanyDAO,
     ):
-        employee = await session.get(Employee, key=1000)
-        assert employee.address != "Brazil"
+        async with session:
+            employee = await session.get(Employee, key=1000)
+            assert employee.address != "Brazil"
 
-        employee.address = "Brazil"
-        await session.commit()
+            employee.address = "Brazil"
 
         new_session = self._get_session(api, employee_dao, company_dao)
         updated_employee = await new_session.get(Employee, key=1000)
@@ -172,26 +168,24 @@ class TestIntegrationCompanyEmployee(CompanyEmployeeFixture):
     async def test_remove_employee_without_firing_with_company_in_cache(
         self, session: Session
     ):
-        company = await session.get(Company, key="COMPANY_A")
-        employee = await session.get(Employee, key=1000)
-
-        assert employee in company.employees
-
-        session.remove(employee)
-
         with pytest.raises(RuntimeError):
-            await session.commit()
+            async with session:
+                company = await session.get(Company, key="COMPANY_A")
+                employee = await session.get(Employee, key=1000)
+
+                assert employee in company.employees
+
+                session.remove(employee)
 
     @pytest.mark.asyncio
     async def test_fire_and_remove_employee(
         self, session: Session, employee_dao: EmployeeDAO
     ):
-        company = await session.get(Company, key="COMPANY_A")
-        employee = await session.get(Employee, key=1000)
-        company.fire_employee(employee)
-        session.remove(employee)
-
-        await session.commit()
+        async with session:
+            company = await session.get(Company, key="COMPANY_A")
+            employee = await session.get(Employee, key=1000)
+            company.fire_employee(employee)
+            session.remove(employee)
 
         q = employee_dao.get_all_employees()
         all_employees = await session.query(q)

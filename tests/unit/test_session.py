@@ -20,9 +20,15 @@ from restio.fields import (
 )
 from restio.fields.base import FrozenType
 from restio.graph import DependencyGraph, NavigationType
-from restio.model import MODEL_PRE_UPDATE_EVENT, MODEL_UPDATE_EVENT, BaseModel
+from restio.model import BaseModel
 from restio.query import query
 from restio.session import PersistencyStrategy, Session, SessionException
+from restio.shared import (
+    CURRENT_SESSION,
+    MODEL_INSTANTIATED_EVENT,
+    MODEL_PRE_UPDATE_EVENT,
+    MODEL_UPDATE_EVENT,
+)
 from restio.state import ModelState
 
 
@@ -975,6 +981,10 @@ class TestSession(ModelsFixture):
         [ModelState.NEW, ModelState.DIRTY, ModelState.CLEAN], repeat=6
     )
 
+    def _check_model_clean(self, model: BaseModel):
+        assert model._state == ModelState.CLEAN
+        assert model._persistent_values == {}
+
     @pytest.mark.parametrize("states", commit_iterations)
     @pytest.mark.asyncio
     async def test_commit(self, t, models_complex, states):
@@ -991,8 +1001,7 @@ class TestSession(ModelsFixture):
         models_in_cache = t._model_cache.get_all_models()
 
         for model in models_in_cache:
-            assert model._state == ModelState.CLEAN
-            assert model._persistent_values == {}
+            self._check_model_clean(model)
 
     commit_with_deleted_iterations = itertools.product(
         [ModelState.NEW, ModelState.DIRTY, ModelState.CLEAN], repeat=3
@@ -1022,8 +1031,7 @@ class TestSession(ModelsFixture):
         models_in_cache = t._model_cache.get_all_models()
 
         for model in models_in_cache:
-            assert model._state == ModelState.CLEAN
-            assert model._persistent_values == {}
+            self._check_model_clean(model)
 
         assert len(set(models_in_cache).intersection(models_deleted)) == 0
 
@@ -1176,6 +1184,111 @@ class TestSession(ModelsFixture):
         await self._check_exception_strategies(
             models, PersistencyStrategy.CONTINUE_ON_ERROR, expected_ignored
         )
+
+    @pytest.mark.asyncio
+    async def test_context_manager_commit(self, t):
+        t.register_dao(ModelDAO(ModelA))
+        model1, model2 = ModelA(key=1), ModelA(key=2)
+
+        assert CURRENT_SESSION.get() is None
+        assert t._model_cache.get_all_models() == set()
+
+        async with t:
+            assert CURRENT_SESSION.get() == t
+            t.add(model1)
+            t.add(model2)
+
+        assert CURRENT_SESSION.get() is None
+
+        for model in (model1, model2):
+            self._check_model_clean(model)
+
+    @pytest.mark.asyncio
+    async def test_context_manager_add_in_context_commit(self, t):
+        add_in_context_dispatched = False
+
+        def add_in_context(model):
+            nonlocal add_in_context_dispatched
+            assert model is not None
+            add_in_context_dispatched = True
+
+        t._listener.subscribe(MODEL_INSTANTIATED_EVENT, add_in_context)
+        t.register_dao(ModelDAO(ModelA))
+
+        assert CURRENT_SESSION.get() is None
+        assert t._model_cache.get_all_models() == set()
+
+        async with t:
+            assert CURRENT_SESSION.get() == t
+            model = ModelA(key=1)
+            assert add_in_context_dispatched
+            assert model in t._model_cache.get_all_models()
+
+        assert CURRENT_SESSION.get() is None
+
+        self._check_model_clean(model)
+
+    @pytest.mark.asyncio
+    async def test_context_manager_add_in_context_commit_with_dependency(self, t):
+        t.register_dao(ModelDAO(ModelA))
+
+        assert CURRENT_SESSION.get() is None
+        assert t._model_cache.get_all_models() == set()
+
+        async with t:
+            assert CURRENT_SESSION.get() == t
+            model1 = ModelA(key=1)
+            model2 = ModelA(key=2, ref=model1)
+            assert {model1, model2}.intersection(t._model_cache.get_all_models())
+
+        assert CURRENT_SESSION.get() is None
+
+        for model in (model1, model2):
+            self._check_model_clean(model)
+
+    @pytest.mark.asyncio
+    async def test_context_manager_exception_in_context_rollback(self, t):
+        t.register_dao(ModelDAO(ModelA))
+        model = ModelA(key=1)
+
+        assert CURRENT_SESSION.get() is None
+
+        with pytest.raises(ValueError, match="Error"):
+            async with t:
+                assert CURRENT_SESSION.get() == t
+                t.add(model)
+                raise ValueError("Error")
+
+        assert CURRENT_SESSION.get() is None
+
+        assert t._model_cache.get_all_models() == set()
+        assert model._state == ModelState.DISCARDED
+
+    @pytest.mark.asyncio
+    async def test_context_manager_exception_in_task_rollback(self, t):
+        class ModelADAO(BaseDAO):
+            async def add(self, obj):
+                raise ValueError("Error")
+
+        t.register_dao(ModelADAO(ModelA))
+        model = ModelA(key=1)
+
+        assert CURRENT_SESSION.get() is None
+
+        with pytest.raises(SessionException) as exc:
+            async with t:
+                assert CURRENT_SESSION.get() == t
+                t.add(model)
+
+        exception = exc.value
+        assert len(exception.exception_tasks) == 1
+        _, inner_exception = exception.exception_tasks[0]
+
+        assert CURRENT_SESSION.get() is None
+
+        assert isinstance(inner_exception, ValueError)
+        assert t._model_cache.get_all_models() == set()
+        assert model._state == ModelState.DISCARDED
 
     @pytest.mark.asyncio
     async def test_process_all_trees(self, t, models_complex):

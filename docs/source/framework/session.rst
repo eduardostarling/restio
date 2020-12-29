@@ -98,6 +98,8 @@ If you don't want to call :code:`register_dao` for every new :code:`Session` ins
 At this point, no operation has been done to the remote server *yet*. It is necessary to tell the :code:`Session` to :code:`commit` its changes explicitly.
 
 
+.. _session_commit:
+
 Commit
 ------
 
@@ -211,3 +213,25 @@ Rollback
     session.rollback()
 
 Rollbacks are useful when the cache is populated with a lot of data. For example, if you have retrieved hundreds of models in order to analyze data and then further update a few models. If one update fails, you might still want to keep the data around to avoid loading everything again for the next operation.
+
+.. _session_context_manager:
+
+Context Manager
+---------------
+
+All session instances can be used as context managers. The code in :ref:`session_commit` could be re-written as follows:
+
+.. code-block:: python
+
+    async with MySession() as session:
+        john = await session.get(Employee, 1)
+        john.address = "Brazil"
+
+        jay = Employee(name="Jay Pritchett", age=65, address="California")
+
+Context managers simplify the manipulation of objects, the commit and the rollback workflows. The a context will automatically handle the following actions:
+
+- **Adding models to the session**: If a model is instantiated within the context body for :code:`session`, then :code:`session.add()` is automatically called for that model.
+- **Commit**: At the end of the context body, the session is automatically commited with :code:`session.commit(raise_for_error=True)`. If the call fails, the corresponding :code:`SessionException` is propagated back to the context.
+- **Rollback on exception thrown**: Any exception thrown within the context body will first cause :code:`session.rollback()` to be triggered. The exception is propagated back to the context, and :code:`session.commit()` is never called.
+- **Rollback on commit error**: If a commit fails, the context will automatically rollback the remaining non-persisted models with :code:`session.rollback()`.

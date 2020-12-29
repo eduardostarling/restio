@@ -2,13 +2,22 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from reprlib import Repr
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple, Type
 from uuid import UUID, uuid4
 
 from restio.event import EventListener
 from restio.fields.base import Field, T_co
-from restio.shared import MODEL_TYPE_REGISTRY
+from restio.shared import (
+    CURRENT_SESSION,
+    MODEL_INSTANTIATED_EVENT,
+    MODEL_PRE_UPDATE_EVENT,
+    MODEL_TYPE_REGISTRY,
+    MODEL_UPDATE_EVENT,
+)
 from restio.state import ModelState
+
+if TYPE_CHECKING:
+    from restio.session import Session
 
 
 def _check_model_type(obj: Optional[BaseModel]):
@@ -135,11 +144,12 @@ class BaseModelMeta(type):
         instance._listener = EventListener()
         instance._initialized = True
 
+        session = CURRENT_SESSION.get()
+        if session:
+            session._listener.dispatch(MODEL_INSTANTIATED_EVENT, instance)
+
         return instance
 
-
-MODEL_PRE_UPDATE_EVENT = "__pre_update__"
-MODEL_UPDATE_EVENT = "__updated__"
 
 _repr_obj: Repr = Repr()
 _repr_obj.maxother = 200

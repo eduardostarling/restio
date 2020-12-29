@@ -7,6 +7,7 @@ Changelog
 - Added official support for Python 3.9.
 - **BREAKING CHANGE**: Renamed the term :code:`Transaction` to :code:`Session`, so that the naming is more consistent with the intent. As per community feedback, the term Transaction would often imply that rollbacks are possible on server side, as it happens in other database ORMs. This change applies to modules, classes, variables and all other references.
 - To follow the above change, an improved description of :code:`Session.rollback()` has been added.
+- Added support for :code:`Session` context managers. When in a context, newly instantiated models will be automatically added to the session. At the end of the context, a :code:`commit` will be automatically triggered, as well as :code:`rollback` when exceptions are thrown. Please see :ref:`session_context_manager` for details.
 
 1.0.0b4
 -------

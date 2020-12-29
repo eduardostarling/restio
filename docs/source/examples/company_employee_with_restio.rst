@@ -289,22 +289,19 @@ Hiring a new employee :code:`Chandler Bing` to :code:`Amazing Company A` can now
         session.register_dao(EmployeeDAO(Employee))
         session.register_dao(CompanyDAO(Company))
 
-        # loads Joseph Tribiani
-        joseph = await session.get(Employee, key=1000)
-        # loads the Amazing Company A
-        company_a = await session.get(Company, key="COMPANY_A")
+        async with session:
+            # loads Joseph Tribiani
+            joseph = await session.get(Employee, key=1000)
+            # loads the Amazing Company A
+            company_a = await session.get(Company, key="COMPANY_A")
 
-        # updates Joseph Tribiani's address
-        joseph.address = "New address"
+            # updates Joseph Tribiani's address
+            joseph.address = "New address"
 
-        # hires Chandler Bing, that lives together with Joseph
-        chandler = Employee(name="Chandler Bing", age=26, address=joseph.address)
-        session.add(chandler)
+            # hires Chandler Bing, that lives together with Joseph
+            chandler = Employee(name="Chandler Bing", age=26, address=joseph.address)
 
-        company_a.hire_employee(chandler)
-
-        # this is where all the requests are effectively made
-        await session.commit()
+            company_a.hire_employee(chandler)
 
 
 Full source code
