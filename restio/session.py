@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import contextmanager
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from enum import IntEnum, auto
 from functools import wraps
 from typing import (
@@ -22,6 +22,7 @@ from typing import (
 
 from restio.cache import ModelCache, QueryCache
 from restio.dao import BaseDAO, DAOTask, DAOTaskCallable, check_dao_implemented_method
+from restio.event import EventListener
 from restio.fields.base import Field, FrozenType, T_co
 from restio.graph import (
     DependencyGraph,
@@ -30,13 +31,14 @@ from restio.graph import (
     Node,
     Tree,
 )
-from restio.model import (
+from restio.model import BaseModel, _check_model_type
+from restio.query import BaseQuery
+from restio.shared import (
+    CURRENT_SESSION,
+    MODEL_INSTANTIATED_EVENT,
     MODEL_PRE_UPDATE_EVENT,
     MODEL_UPDATE_EVENT,
-    BaseModel,
-    _check_model_type,
 )
-from restio.query import BaseQuery
 from restio.state import ModelState, ModelStateMachine, Transition
 
 Model_co = TypeVar("Model_co", bound=BaseModel, covariant=True)
@@ -188,6 +190,8 @@ class Session:
     _strategy: PersistencyStrategy
     _state: ContextVar[SessionState]
     _model_lock: Dict[str, asyncio.Lock]
+    _session_token: Token[Optional[Session]]
+    _listener: EventListener
 
     def __init__(
         self, strategy: PersistencyStrategy = PersistencyStrategy.INTERRUPT_ON_ERROR
@@ -198,6 +202,9 @@ class Session:
         self._strategy = strategy
         self._state = ContextVar("SessionStateContext", default=SessionState.STANDBY)
         self._model_lock = {}
+        self._listener = EventListener()
+
+        self._listener.subscribe(MODEL_INSTANTIATED_EVENT, self._add_from_context)
 
     def reset(self):
         """
@@ -338,6 +345,10 @@ class Session:
 
         model._state = ModelStateMachine.transition(Transition.ADD_OBJECT, model._state)
         self.register_model(model, force=False)
+
+    def _add_from_context(self, model: BaseModel):
+        if self.state == SessionState.STANDBY:
+            self.add(model)
 
     def remove(self, model: BaseModel) -> bool:
         """
@@ -890,3 +901,27 @@ class Session:
     ):
         models = self._model_cache.get_all_models() if not models else models
         return set(model for model in models if model._state in state)
+
+    async def __aenter__(self):
+        self._session_token = CURRENT_SESSION.set(self)
+        return self
+
+    async def __aexit__(self, type, value, traceback):
+        # exception raised in the context, so we just need to propagate
+        # the exception back after rolling back the session
+        if value:
+            self.rollback()
+            CURRENT_SESSION.reset(self._session_token)
+            return False
+
+        # processing of the context went well, so we proceed and commit the
+        # exception that will be rolled back in case of errors
+        try:
+            await self.commit(raise_for_status=True)
+        except SessionException:
+            self.rollback()
+            raise
+        finally:
+            CURRENT_SESSION.reset(self._session_token)
+
+        return True
